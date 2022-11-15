@@ -276,28 +276,34 @@ class Report:
 
 
 def normalize_input_info(input_info):
-    if os.stat(input_info[0]).st_size == 0:
+    if os.stat(input_info[1]).st_size == 0:
         return "Пустой файл"
+    if input_info[0] != "Вакансии" and input_info[0] != "Статистика":
+        return "Введён неправильный тип вывода"
     return "Нормализация прошла успешно"
 
 
 def main_function():
-    input_requests = ["Введите название файла: ", "Введите название профессии: "]
+    input_requests = ["Выберите тип вывода: ", "Введите название файла: ", "Введите название профессии: "]
     input_info = [input(input_request) for input_request in input_requests]  # vacancies из условия == vacancies_by_year
-    # input_info = ["vacancies_by_year.csv", "аналитик"]
+    # input_info = ["Вакансии", "vacancies_by_year.csv", "Аналитик"]
     normalize_result = normalize_input_info(input_info)
     if normalize_result != "Нормализация прошла успешно":
-        return normalize_result
-    data_set = DataSet(input_info[0])
+        print(normalize_result)
+        return
+    data_set = DataSet(input_info[1])
     if len(data_set.vacancies_objects) == 0:
-        return "Нет данных"
+        print("Нет данных")
+        return
     input_connect = InputConnect()
     formatted_info = input_connect.info_formatter(data_set.vacancies_objects)
-    info = input_connect.info_finder(formatted_info, input_info[1])
+    info = input_connect.info_finder(formatted_info, input_info[2])
     report = Report(info)
-    report.generate_excel(input_info[1])
-    report.generate_image(input_info[1])
-    report.generate_pdf(input_info[1])
+    if input_info[0] == "Вакансии":
+        report.generate_excel(input_info[2])
+    else:
+        report.generate_image(input_info[2])
+        report.generate_pdf(input_info[2])
 
 
 main_function()

@@ -2,12 +2,225 @@ import csv
 import re
 import os
 from functools import cmp_to_key
+from prettytable import PrettyTable
+from prettytable import ALL
 from openpyxl import Workbook
 from openpyxl.styles import Font, Border, Side
 import matplotlib.pyplot as plt
 import numpy as np
 from jinja2 import Environment, FileSystemLoader
 import pdfkit
+
+
+def normalize_input_info(input_info):
+    table_fields = ["Название", "Описание", "Навыки", "Опыт работы", "Премиум-вакансия", "Компания", "Оклад",
+                    "Название региона", "Дата публикации вакансии", "Идентификатор валюты оклада", "None"]
+    if os.stat(input_info[0]).st_size == 0:
+        return "Пустой файл"
+    if input_info[1] == '':
+        input_info[1] = "None: None"
+    temp = input_info[1].find(': ')
+    if temp == -1:
+        return "Формат ввода некорректен"
+    input_info[1] = [input_info[1][:temp], input_info[1][temp + 2:]]
+    if input_info[1][0] not in table_fields:
+        return "Параметр поиска некорректен"
+    if input_info[2] == '':
+        input_info[2] = '№'
+    elif input_info[2] not in table_fields:
+        return "Параметр сортировки некорректен"
+    if input_info[3] == 'Да':
+        input_info[3] = True
+    elif input_info[3] == 'Нет' or input_info[3] == '':
+        input_info[3] = False
+    else:
+        return "Порядок сортировки задан некорректно"
+    input_info[4] = list(map(lambda x: 0 if x == '' else int(x) - 1, input_info[4].split(' ')))
+    if len(input_info[4]) == 1:
+        input_info[4].append(10000)
+    input_info[5] = input_info[5].split(', ')
+    if input_info[5][0] == '':
+        input_info[5] = table_fields[:9]
+    input_info[5].insert(0, '№')
+    return "Нормализация прошла успешно"
+
+
+def csv_reader(file_name):
+    with open(file_name, encoding="utf-8-sig") as f:
+        reader = [x for x in csv.reader(f)]
+        headers = reader.pop(0)
+        header_len = len(headers)
+        info = list(filter(lambda data: '' not in data and len(data) == header_len, reader))
+    return (headers, info)
+
+
+def csv_filter(headers, info):
+    def normalize_info_from_csv(info_cell):
+        temp_info = "__temp__".join(info_cell.split("\n"))
+        temp_info = re.sub(r"<[^<>]*>", "", temp_info)
+        temp_info = re.sub(r"\s+", " ", temp_info)
+        return str.strip(temp_info)
+
+    info_dictionaries = []
+    for info_row in info:
+        info_dictionary = {}
+        for i in range(len(headers)):
+            info_dictionary[headers[i]] = normalize_info_from_csv(info_row[i])
+        info_dictionaries.append(info_dictionary)
+    return info_dictionaries
+
+
+def info_formatter(info_dictionaries):
+    def formatter_string_number(str_num):
+        num = int(str_num if str_num.find('.') == -1 else str_num[:len(str_num) - 2])
+        str_num_reverse = str(num)[::-1]
+        return ' '.join(str_num_reverse[i:i + 3] for i in range(0, len(str_num_reverse), 3))[::-1]
+
+    def formatter_experience_id(new_info_dictionary, value, key):
+        new_info_dictionary["Опыт работы"] = dic_experience[value]
+
+    def formatter_salary_from(new_info_dictionary, value, key):
+        new_info_dictionary['Оклад'] = formatter_string_number(value)
+
+    def formatter_salary_to(new_info_dictionary, value, key):
+        new_info_dictionary['Оклад'] = f"{new_info_dictionary['Оклад']} - {formatter_string_number(value)}"
+
+    def formatter_salary_currency(new_info_dictionary, value, key):
+        new_info_dictionary["Оклад"] = f"{new_info_dictionary['Оклад']} ({dic_currency[value]}) ({new_info_dictionary['salary_currency']})"
+
+    def formatter_salary_gross(new_info_dictionary, value, key):
+        new_info_dictionary['salary_currency'] = 'Без вычета налогов' if value == 'True' else 'С вычетом налогов' if value == 'False' else value
+
+    def formatter_published_at(new_info_dictionary, value, key):
+        new_info_dictionary["Дата публикации вакансии"] = f"{value}#{value[8:10]}.{value[5:7]}.{value[0:4]}"
+
+    def formatter_premium(new_info_dictionary, value, key):
+        new_info_dictionary["Премиум-вакансия"] = 'Да' if value == 'True' else 'Нет'
+
+    def formatter_key_skills(new_info_dictionary, value, key):
+        value = value.replace("__temp__", '\n')
+        new_info_dictionary["Количество навыков"] = value.count('\n') + 1
+        new_info_dictionary["Навыки"] = f"{value[0:100]}..." if len(value) > 100 else value
+
+    def formatter_standart_field_value(new_info_dictionary, value, key):
+        new_info_dictionary[dic_naming[key]] = f"{value[0:100]}..." if len(value) > 100 else value
+
+    dic_naming = {"name": "Название", "description": "Описание", "employer_name": "Компания",
+                  "area_name": "Название региона"}
+    dic_experience = {"noExperience": "Нет опыта", "between1And3": "От 1 года до 3 лет",
+                      "between3And6": "От 3 до 6 лет", "moreThan6": "Более 6 лет"}
+    dic_currency = {"AZN": "Манаты", "BYR": "Белорусские рубли", "EUR": "Евро",
+                    "GEL": "Грузинский лари", "KGS": "Киргизский сом", "KZT": "Тенге", "RUR": "Рубли",
+                    "UAH": "Гривны", "USD": "Доллары", "UZS": "Узбекский сум"}
+    dic_func = {"experience_id": formatter_experience_id, "salary_from": formatter_salary_from,
+                "salary_to": formatter_salary_to, "salary_currency": formatter_salary_currency,
+                "salary_gross": formatter_salary_gross, "published_at": formatter_published_at,
+                "premium": formatter_premium, "key_skills": formatter_key_skills,
+                "name": formatter_standart_field_value, "description": formatter_standart_field_value,
+                "employer_name": formatter_standart_field_value, "area_name": formatter_standart_field_value}
+
+    formatted_info_dictionaries = []
+    for info_dictionary in info_dictionaries:
+        formatted_info_dictionary = {}
+        for item_key, item_value in info_dictionary.items():
+            dic_func[item_key](formatted_info_dictionary, item_value, item_key)
+        formatted_info_dictionary.pop('salary_currency')
+        formatted_info_dictionaries.append(formatted_info_dictionary)
+    return formatted_info_dictionaries
+
+
+def info_filter(info_dictionaries, filtering_parameter):
+    def filter_verbatim(dic, field_value_should):
+        return dic[field_value_should[0]] == field_value_should[1]
+
+    def filter_key_skills(dic, filtering_parameter):
+        field_value_should = filtering_parameter[1].split(', ')
+        dic_values = dic['Навыки'].replace(', ', '\n').replace('...', '\n').split('\n')
+        return all(list(map(lambda value_should: value_should in dic_values, field_value_should)))
+
+    def filter_salary(dic, field_value_should):
+        dic_value = dic["Оклад"]
+        salary_area = dic_value[:dic_value.find('(')].replace(' ', '').split('-')
+        return int(salary_area[0]) <= int(field_value_should[1]) <= int(salary_area[1])
+
+    def filter_salary_currency(dic, field_value_should):
+        dic_value = dic["Оклад"]
+        temp = dic_value[dic_value.find('(') + 1:dic_value.find(')')]
+        return temp == field_value_should[1]
+
+    def filter_published_at(dic, field_value_should):
+        dic_value = dic["Дата публикации вакансии"]
+        return dic_value[dic_value.find('#') + 1:] == field_value_should[1]
+
+    dic_filter = {"Название": filter_verbatim, "Описание": filter_verbatim, "Навыки": filter_key_skills,
+                  "Опыт работы": filter_verbatim, "Премиум-вакансия": filter_verbatim, "Компания": filter_verbatim,
+                  "Оклад": filter_salary, "Дата публикации вакансии": filter_published_at,
+                  "Идентификатор валюты оклада": filter_salary_currency, "Название региона": filter_verbatim}
+
+    return list(filter(lambda info_dictionary:
+        filtering_parameter[0] == "None" or dic_filter[filtering_parameter[0]](info_dictionary, filtering_parameter),
+        info_dictionaries))
+
+
+def info_sorter(info_dictionaries, sort_field, reverse_sort):
+    def lexcographic_sorter(row1, row2):
+        return 1 if row1[sort_field] >= row2[sort_field] else -1
+
+    def key_skills_sorter(row1, row2):
+        (row1_len, row2_len) = list(map(lambda row: row["Количество навыков"], (row1, row2)))
+        return row1_len - row2_len
+
+    def experience_sorter(row1, row2):
+        def find_first_num(row):
+            row_value = row["Опыт работы"]
+            row_num = list(filter(lambda char: char.isdigit(), row_value))
+            return int(row_num[0]) if len(row_num) > 0 else 0
+        (row1_num, row2_num) = list(map(lambda row: find_first_num(row), (row1, row2)))
+        return row1_num - row2_num
+
+    def salary_sorter(row1, row2):
+        def salary_process(row):
+            dic_currency_to_rub = {"Манаты": 35.68, "Белорусские рубли": 23.91, "Евро": 59.90, "Грузинский лари": 21.74,
+                                   "Киргизский сом": 0.76, "Тенге": 0.13, "Рубли": 1, "Гривны": 1.64, "Доллары": 60.66,
+                                   "Узбекский сум": 0.0055}
+            string_nums = row[sort_field].split(' - ')
+            salary_currency = row[sort_field][row[sort_field].find('(') + 1:row[sort_field].find(')')]
+            string_nums[1] = string_nums[1][:string_nums[1].find(' (')]
+            nums = list(map(lambda string_num: int(string_num.replace(' ', '')), string_nums))
+            rub_nums = list(map(lambda num: num * dic_currency_to_rub[salary_currency], nums))
+            return sum(rub_nums) / 2
+        (row1_salary, row2_salary) = list(map(lambda row: salary_process(row), (row1, row2)))
+        return row1_salary - row2_salary
+
+    dic_sorter = {"Название": lexcographic_sorter, "Описание": lexcographic_sorter, "Навыки": key_skills_sorter,
+                  "Опыт работы": experience_sorter, "Премиум-вакансия": lexcographic_sorter,
+                  "Компания": lexcographic_sorter, "Оклад": salary_sorter, "Название региона": lexcographic_sorter,
+                  "Дата публикации вакансии": lexcographic_sorter}
+
+    info_dictionaries.sort(key=cmp_to_key(dic_sorter[sort_field]), reverse=reverse_sort)
+
+    return info_dictionaries
+
+
+def print_vacancies(info_dictionaries, start_end_nums, table_fields):
+    info_table = PrettyTable(["Название", "Описание", "Навыки", "Опыт работы", "Премиум-вакансия",
+                              "Компания", "Оклад", "Название региона", "Дата публикации вакансии"])
+    for info_dictionary in info_dictionaries:
+        values = list(map(lambda key: info_dictionary[key], info_dictionary))
+        values.pop(2)
+        info_table.add_row(values)
+    published_at_data = list(filter(lambda x: x != '', info_table.get_string(
+        fields=["Дата публикации вакансии"], border=False, header=False).replace(' ', '').split('\n')))
+    info_table.del_column("Дата публикации вакансии")
+    info_table.add_column("Дата публикации вакансии", list(map(lambda x: x[x.find('#') + 1:], published_at_data)))
+    info_table.add_autoindex('№')
+    info_table.hrules = ALL
+    info_table.align = 'l'
+    info_table.max_width = 20
+    print(info_table.get_string(start=start_end_nums[0], end=start_end_nums[1], fields=table_fields))
+
+
+#####################################################################################################################################
 
 
 class Vacancy:
@@ -275,35 +488,61 @@ class Report:
         pdfkit.from_string(pdf_template, 'report.pdf', options=options, configuration=config)
 
 
-def normalize_input_info(input_info):
-    if os.stat(input_info[1]).st_size == 0:
-        return "Пустой файл"
-    if input_info[0] != "Вакансии" and input_info[0] != "Статистика":
-        return "Введён неправильный тип вывода"
-    return "Нормализация прошла успешно"
+#####################################################################################################################################
 
 
-def main_function():
-    input_requests = ["Выберите тип вывода: ", "Введите название файла: ", "Введите название профессии: "]
-    input_info = [input(input_request) for input_request in input_requests]  # vacancies из условия == vacancies_by_year
-    # input_info = ["Вакансии", "vacancies_by_year.csv", "Аналитик"]
+def get_vacancies():
+    input_requests = ["Введите название файла: ", "Введите параметр фильтрации: ", "Введите параметр сортировки: ",
+                      "Обратный порядок сортировки (Да / Нет): ", "Введите диапазон вывода: ",
+                      "Введите требуемые столбцы: "]
+    input_info = [input(input_request) for input_request in input_requests]
     normalize_result = normalize_input_info(input_info)
     if normalize_result != "Нормализация прошла успешно":
-        print(normalize_result)
+        return normalize_result
+    (headers, info) = csv_reader(input_info[0])
+    filtered_csv_data = csv_filter(headers, info)
+    if len(filtered_csv_data) == 0:
+        return "Нет данных"
+    formatted_info = info_formatter(filtered_csv_data)
+    filtered_info = info_filter(formatted_info, input_info[1])
+    if len(filtered_info) == 0:
+        return "Ничего не найдено"
+    if input_info[2] != '№':
+        filtered_info = info_sorter(filtered_info, input_info[2], input_info[3])
+    print_vacancies(filtered_info, input_info[4], input_info[5])
+
+
+def get_statistics():
+    input_requests = ["Введите название файла: ", "Введите название профессии: "]
+    input_info = [input(input_request) for input_request in input_requests]
+    # input_info = ["vacancies_by_year.csv", "Аналитик"]
+    if os.stat(input_info[0]).st_size == 0:
+        print("Пустой файл")
         return
-    data_set = DataSet(input_info[1])
+    data_set = DataSet(input_info[0])
     if len(data_set.vacancies_objects) == 0:
         print("Нет данных")
         return
     input_connect = InputConnect()
     formatted_info = input_connect.info_formatter(data_set.vacancies_objects)
-    info = input_connect.info_finder(formatted_info, input_info[2])
+    info = input_connect.info_finder(formatted_info, input_info[1])
     report = Report(info)
-    if input_info[0] == "Вакансии":
-        report.generate_excel(input_info[2])
+    report.generate_excel(input_info[1])
+    report.generate_image(input_info[1])
+    report.generate_pdf(input_info[1])
+
+
+def main_function():
+    main_input_request = "Выберите тип вывода: "
+    main_input_info = input(main_input_request)
+    # input_info = ["Вакансии"]
+    if main_input_info != "Вакансии" and main_input_info != "Статистика":
+        print("Введён неправильный тип вывода")
+        return
+    if main_input_info == "Вакансии":
+        get_vacancies()
     else:
-        report.generate_image(input_info[2])
-        report.generate_pdf(input_info[2])
+        get_statistics()
 
 
 main_function()

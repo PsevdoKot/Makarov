@@ -13,6 +13,14 @@ import pdfkit
 
 
 def normalize_input_info(input_info):
+    """Нормализует входящую информацию от пользователя.
+
+    Args:
+        input_info (list[str | bool | list[str] | list[int]]): Входящая информация от пользователя
+
+    Returns:
+        string: Результат нормализации входящей информации
+    """
     table_fields = ["Название", "Описание", "Навыки", "Опыт работы", "Премиум-вакансия", "Компания", "Оклад",
                     "Название региона", "Дата публикации вакансии", "Идентификатор валюты оклада", "None"]
     if os.stat(input_info[0]).st_size == 0:
@@ -46,16 +54,42 @@ def normalize_input_info(input_info):
 
 
 def csv_reader(file_name):
+    """Чтение csv файла.
+
+    Args:
+        file_name (str): Название csv файла для чтения
+
+    Returns:
+        tuple(str): Результат чтения из csv файла в виде пары: лист с названиями столбцов, лист с основными данными
+    """
     with open(file_name, encoding="utf-8-sig") as f:
         reader = [x for x in csv.reader(f)]
         headers = reader.pop(0)
         header_len = len(headers)
         info = list(filter(lambda data: '' not in data and len(data) == header_len, reader))
-    return (headers, info)
+    return headers, info
 
 
 def csv_filter(headers, info):
+    """Преобразование данных из csv файла в список словарей, в котором каждому словарю соответствует одна строка
+        из файла (ключ - название столбца)
+
+    Args:
+        headers (list[str]): Названия столбцов
+        info (list[list[str]]): Основные данные csv файла
+
+    Returns:
+        list[dict[str,str]]: Список строк в виде словарей
+    """
     def normalize_info_from_csv(info_cell):
+        """Удаление лишних символов из элемента словаря (html-тегов и т.д.)
+
+        Args:
+            info_cell (str): Ячейка csv файла
+
+        Returns:
+            str: Нормализованная ячейка csv файла
+        """
         temp_info = "__temp__".join(info_cell.split("\n"))
         temp_info = re.sub(r"<[^<>]*>", "", temp_info)
         temp_info = re.sub(r"\s+", " ", temp_info)
@@ -71,38 +105,116 @@ def csv_filter(headers, info):
 
 
 def info_formatter(info_dictionaries):
+    """Преобразование данных из csv файла к визуально приятному виду
+
+        Args:
+            info_dictionaries (list[dict[str,str]]): список словарей строк csv файла
+
+        Returns:
+            list[dict[str,str]]: Результат форматирования
+    """
     def formatter_string_number(str_num):
+        """Устранение дробных разделителей в числе и расстановка пробелов между тысячными долями числа
+
+        Args:
+            str_num (str): Число для нормализации
+
+        Returns:
+            str: Результат форматирования числа
+        """
         num = int(str_num if str_num.find('.') == -1 else str_num[:len(str_num) - 2])
         str_num_reverse = str(num)[::-1]
         return ' '.join(str_num_reverse[i:i + 3] for i in range(0, len(str_num_reverse), 3))[::-1]
 
-    def formatter_experience_id(new_info_dictionary, value, key):
+    def formatter_experience_id(new_info_dictionary, value):
+        """Преобразование опыта работы, написанный на английском, в соответствующий русский вариант
+            и запись в словарь результата
+
+        Args:
+            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
+            value (str): Английский вариант написания
+        """
         new_info_dictionary["Опыт работы"] = dic_experience[value]
 
-    def formatter_salary_from(new_info_dictionary, value, key):
+    def formatter_salary_from(new_info_dictionary, value):
+        """Преобразование нижней линии оклада в нормированный вид и запись в словарь результата
+
+        Args:
+            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
+            value (str): Значение оклада
+        """
         new_info_dictionary['Оклад'] = formatter_string_number(value)
 
-    def formatter_salary_to(new_info_dictionary, value, key):
+    def formatter_salary_to(new_info_dictionary, value):
+        """Преобразование верхней линии оклада в нормированный вид и запись в словарь результата
+
+        Args:
+            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
+            value (str): Значение оклада
+        """
         new_info_dictionary['Оклад'] = f"{new_info_dictionary['Оклад']} - {formatter_string_number(value)}"
 
-    def formatter_salary_currency(new_info_dictionary, value, key):
-        new_info_dictionary["Оклад"] = f"{new_info_dictionary['Оклад']} ({dic_currency[value]}) ({new_info_dictionary['salary_currency']})"
+    def formatter_salary_currency(new_info_dictionary, value):
+        """Преобразование валюты, написанный на английском, в соответствующий русский вариант
+            и запись в словарь результата
 
-    def formatter_salary_gross(new_info_dictionary, value, key):
-        new_info_dictionary['salary_currency'] = 'Без вычета налогов' if value == 'True' else 'С вычетом налогов' if value == 'False' else value
+        Args:
+            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
+            value (str): Английский вариант написания
+        """
+        new_info_dictionary["Оклад"] = f"{new_info_dictionary['Оклад']} ({dic_currency[value]})" \
+                                       f" ({new_info_dictionary['salary_currency']})"
 
-    def formatter_published_at(new_info_dictionary, value, key):
+    def formatter_salary_gross(new_info_dictionary, value):
+        """Преобразование значения вычета налогов, написанный на английском, в соответствующий русский вариант
+            и запись в словарь результата
+
+        Args:
+            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
+            value (str): Английский вариант написания
+        """
+        new_info_dictionary['salary_currency'] = 'Без вычета налогов' if value == 'True' \
+            else 'С вычетом налогов' if value == 'False' else value
+
+    def formatter_published_at(new_info_dictionary, value):
+        """Преобразование времени выкладывания вакансии в формат ДД:ММ:ГГ и запись в словарь результата
+
+        Args:
+            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
+            value (str): Значение времени выкладывания вакансии для форматирования
+        """
         new_info_dictionary["Дата публикации вакансии"] = f"{value}#{value[8:10]}.{value[5:7]}.{value[0:4]}"
 
-    def formatter_premium(new_info_dictionary, value, key):
+    def formatter_premium(new_info_dictionary, value):
+        """Преобразование значений премиумности вакансии, написанный на английском, в соответствующий русский вариант
+             и запись в словарь результата
+
+        Args:
+            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
+            value (str): Английский вариант написания
+        """
         new_info_dictionary["Премиум-вакансия"] = 'Да' if value == 'True' else 'Нет'
 
-    def formatter_key_skills(new_info_dictionary, value, key):
+    def formatter_key_skills(new_info_dictionary, value):
+        """Преобразование требуемых скиллов, написанных на английском, в соответствующий русский вариант
+            и запись в словарь результата
+
+        Args:
+            new_info_dictionary (dict[str,str | int]): Новый список словарей для результата общего метода
+            value (str): Английский вариант написания
+        """
         value = value.replace("__temp__", '\n')
         new_info_dictionary["Количество навыков"] = value.count('\n') + 1
         new_info_dictionary["Навыки"] = f"{value[0:100]}..." if len(value) > 100 else value
 
-    def formatter_standart_field_value(new_info_dictionary, value, key):
+    def formatter_standard_field_value(new_info_dictionary, value, key):
+        """Получение только первых 100 символов строки и запись в словарь результата
+
+        Args:
+            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
+            value (str): Строка для форматирования
+            key (str): Ключ для записи в список словарей нового значения
+        """
         new_info_dictionary[dic_naming[key]] = f"{value[0:100]}..." if len(value) > 100 else value
 
     dic_naming = {"name": "Название", "description": "Описание", "employer_name": "Компания",
@@ -116,8 +228,8 @@ def info_formatter(info_dictionaries):
                 "salary_to": formatter_salary_to, "salary_currency": formatter_salary_currency,
                 "salary_gross": formatter_salary_gross, "published_at": formatter_published_at,
                 "premium": formatter_premium, "key_skills": formatter_key_skills,
-                "name": formatter_standart_field_value, "description": formatter_standart_field_value,
-                "employer_name": formatter_standart_field_value, "area_name": formatter_standart_field_value}
+                "name": formatter_standard_field_value, "description": formatter_standard_field_value,
+                "employer_name": formatter_standard_field_value, "area_name": formatter_standard_field_value}
 
     formatted_info_dictionaries = []
     for info_dictionary in info_dictionaries:
@@ -130,25 +242,79 @@ def info_formatter(info_dictionaries):
 
 
 def info_filter(info_dictionaries, filtering_parameter):
+    """Фильтрация списка словарей, соответствующих строкам csv файла
+
+        Args:
+            info_dictionaries (list[dict[str,str]]): Список словарей для фильтрации
+            filtering_parameter (str): Параметр фильтрации
+
+        Returns:
+            list[dict[str,str]]: Результат фильтрации
+    """
     def filter_verbatim(dic, field_value_should):
+        """Лексикографическое сравнивание значения из словаря с требуемым значением
+
+        Args:
+            dic (dict[str,str]): Словарь, представляющий собой одну строку csv файла
+            field_value_should (tuple[str, str]): Ключ словаря для фильтрации и соответсвующее требуемое значение
+
+        Returns:
+            string: Результат сравнения
+        """
         return dic[field_value_should[0]] == field_value_should[1]
 
-    def filter_key_skills(dic, filtering_parameter):
-        field_value_should = filtering_parameter[1].split(', ')
+    def filter_key_skills(dic, field_value_should):
+        """Уникальное сравнивание значения скиллов из словаря с требуемым значением
+
+        Args:
+            dic (dict[str,str]): Словарь, представляющий собой одну строку csv файла
+            field_value_should (tuple[str, str]): Ключ словаря для фильтрации и соответсвующее требуемое значение
+
+        Returns:
+            string: Результат сравнения
+        """
+        value_should = field_value_should[1].split(', ')
         dic_values = dic['Навыки'].replace(', ', '\n').replace('...', '\n').split('\n')
-        return all(list(map(lambda value_should: value_should in dic_values, field_value_should)))
+        return all(list(map(lambda value_should: value_should in dic_values, value_should)))
 
     def filter_salary(dic, field_value_should):
+        """Уникальное сравнивание значения оклада из словаря с требуемым значением
+
+        Args:
+            dic (dict[str,str]): Словарь, представляющий собой одну строку csv файла
+            field_value_should (tuple[str, str]): Ключ словаря для фильтрации и соответсвующее требуемое значение
+
+        Returns:
+            string: Результат сравнения
+        """
         dic_value = dic["Оклад"]
         salary_area = dic_value[:dic_value.find('(')].replace(' ', '').split('-')
         return int(salary_area[0]) <= int(field_value_should[1]) <= int(salary_area[1])
 
     def filter_salary_currency(dic, field_value_should):
+        """Уникальное сравнивание значения валюты оклада из словаря с требуемым значением
+
+        Args:
+            dic (dict[str,str]): Словарь, представляющий собой одну строку csv файла
+            field_value_should (tuple[str, str]): Ключ словаря для фильтрации и соответсвующее требуемое значение
+
+        Returns:
+            string: Результат сравнения
+        """
         dic_value = dic["Оклад"]
         temp = dic_value[dic_value.find('(') + 1:dic_value.find(')')]
         return temp == field_value_should[1]
 
     def filter_published_at(dic, field_value_should):
+        """Уникальное сравнивание значения времени публикации из словаря с требуемым значением
+
+        Args:
+            dic (dict[str,str]): Словарь, представляющий собой одну строку csv файла
+            field_value_should (tuple[str, str]): Ключ словаря для фильтрации и соответсвующее требуемое значение
+
+        Returns:
+            string: Результат сравнения
+        """
         dic_value = dic["Дата публикации вакансии"]
         return dic_value[dic_value.find('#') + 1:] == field_value_should[1]
 
@@ -158,28 +324,89 @@ def info_filter(info_dictionaries, filtering_parameter):
                   "Идентификатор валюты оклада": filter_salary_currency, "Название региона": filter_verbatim}
 
     return list(filter(lambda info_dictionary:
-        filtering_parameter[0] == "None" or dic_filter[filtering_parameter[0]](info_dictionary, filtering_parameter),
-        info_dictionaries))
+                       filtering_parameter[0] == "None" or
+                       dic_filter[filtering_parameter[0]](info_dictionary, filtering_parameter), info_dictionaries))
 
 
 def info_sorter(info_dictionaries, sort_field, reverse_sort):
+    """Сортировка списка словарей, представляющих собой строки файла csv формата
+
+        Args:
+            info_dictionaries (list[dict[str,str]]): Данные для сортировки
+            sort_field (str): Параметр сортировки
+            reverse_sort (bool): Сортировать ли в обратном порядке
+
+        Returns:
+            list[dict[str,str]]: Результат сортировки
+    """
     def lexcographic_sorter(row1, row2):
+        """Лексикографическое сравнение одного словаря с другим по параметру сортировки
+
+        Args:
+            row1 (dict[str,str]): Первый словаря для сравнения
+            row2 (dict[str,str]): Первый словаря для сравнения
+
+        Returns:
+            int: Результат сравнения
+        """
         return 1 if row1[sort_field] >= row2[sort_field] else -1
 
     def key_skills_sorter(row1, row2):
+        """Сравнение одного словаря с другим по количеству навыков
+
+        Args:
+            row1 (dict[str,str]): Первый словаря для сравнения
+            row2 (dict[str,str]): Первый словаря для сравнения
+
+        Returns:
+            int: Результат сравнения
+        """
         (row1_len, row2_len) = list(map(lambda row: row["Количество навыков"], (row1, row2)))
         return row1_len - row2_len
 
     def experience_sorter(row1, row2):
-        def find_first_num(row):
-            row_value = row["Опыт работы"]
+        """Сравнение одного словаря с другим по количеству требуемых лет опыта
+
+        Args:
+            row1 (dict[str,str]): Первый словаря для сравнения
+            row2 (dict[str,str]): Первый словаря для сравнения
+
+        Returns:
+            int: Результат сравнения
+        """
+        def find_first_num(row_value):
+            """Получение первого числа в строке
+
+            Args:
+                row_value (str): Строка для поиска
+
+            Returns:
+                int: Результат сравнения
+            """
             row_num = list(filter(lambda char: char.isdigit(), row_value))
             return int(row_num[0]) if len(row_num) > 0 else 0
-        (row1_num, row2_num) = list(map(lambda row: find_first_num(row), (row1, row2)))
+        (row1_num, row2_num) = list(map(lambda row: find_first_num(row["Опыт работы"]), (row1, row2)))
         return row1_num - row2_num
 
     def salary_sorter(row1, row2):
+        """Сравнение одного словаря с другим по окладу
+
+        Args:
+            row1 (dict[str,str]): Первый словаря для сравнения
+            row2 (dict[str,str]): Первый словаря для сравнения
+
+        Returns:
+            int: Результат сравнения
+        """
         def salary_process(row):
+            """Вычисление среднего значения оклада
+
+            Args:
+                row (dict[str,str]): Словарь, представляющий собой строку csv файла
+
+            Returns:
+                int: Среднее оклада
+            """
             dic_currency_to_rub = {"Манаты": 35.68, "Белорусские рубли": 23.91, "Евро": 59.90, "Грузинский лари": 21.74,
                                    "Киргизский сом": 0.76, "Тенге": 0.13, "Рубли": 1, "Гривны": 1.64, "Доллары": 60.66,
                                    "Узбекский сум": 0.0055}
@@ -203,6 +430,13 @@ def info_sorter(info_dictionaries, sort_field, reverse_sort):
 
 
 def print_vacancies(info_dictionaries, start_end_nums, table_fields):
+    """Печать талицы с вакансиями
+
+    Args:
+        info_dictionaries (list[dict[str,str]]): Список словарей, соответствующих строкам файла csv формата
+        start_end_nums (list[int, int]): От и до какого номера включать вакансии в таблицу
+        table_fields (list[str]): Название столбцов для вывода в таблицу
+    """
     info_table = PrettyTable(["Название", "Описание", "Навыки", "Опыт работы", "Премиум-вакансия",
                               "Компания", "Оклад", "Название региона", "Дата публикации вакансии"])
     for info_dictionary in info_dictionaries:
@@ -220,12 +454,38 @@ def print_vacancies(info_dictionaries, start_end_nums, table_fields):
     print(info_table.get_string(start=start_end_nums[0], end=start_end_nums[1], fields=table_fields))
 
 
-#####################################################################################################################################
+######################################################################################################################
 
 
 class Vacancy:
+    """Класс для представления вакансии
+
+    Attributes:
+        name (str): Название вакансии
+        description (str):  Описание вакансии
+        key_skills (list[str]): Необходимые скиллы для вакансии
+        experience_id (str): Необходимый опыт для вакансии
+        premium (str): Является ли вакансия премиумной
+        employer_name (str): Название компании
+        salary (Salary): Величина оклада
+        area_name (str): Название города
+        published_at (str): Время публикации вакансии
+    """
     def __init__(self, name, description, key_skills, experience_id, premium,
                  employer_name, salary, area_name, published_at):
+        """Инициализирует объект Vacancy
+
+        Args:
+            name (str):
+            description (str | None):
+            key_skills (list[str] | None):
+            experience_id (str | None):
+            premium (str | None):
+            employer_name (str | None):
+            salary (Salary):
+            area_name (str):
+            published_at (str):
+        """
         self.name = name
         self.description = description
         self.key_skills = key_skills
@@ -238,13 +498,34 @@ class Vacancy:
 
 
 class Salary:
+    """Класс для представления оклада
+
+    Attributes:
+        salary_from (str):
+        salary_to (str):
+        salary_gross (str):
+        salary_currency (str):
+    """
     def __init__(self, salary_from, salary_to, salary_gross, salary_currency):
+        """Инициализирует объект Salary
+
+        Args:
+            salary_from (str):
+            salary_to (str):
+            salary_gross (any):
+            salary_currency (str):
+        """
         self.salary_from = salary_from
         self.salary_to = salary_to
         self.salary_gross = salary_gross
         self.salary_currency = salary_currency
 
     def currency_to_rur(self):
+        """Переводит верхнюю и нижнюю вилки оклада в рубли
+
+        Returns:
+            list[int,int]: Верхняя и нижняя вилки оклада в рублях
+        """
         dic_currency_to_rub = {"Манаты": 35.68, "Белорусские рубли": 23.91, "Евро": 59.90, "Грузинский лари": 21.74,
                                "Киргизский сом": 0.76, "Тенге": 0.13, "Рубли": 1, "Гривны": 1.64, "Доллары": 60.66,
                                "Узбекский сум": 0.0055}
@@ -252,26 +533,67 @@ class Salary:
                         (self.salary_from, self.salary_to)))
 
     def get_salary(self):
+        """Передаёт среднее значение оклада
+
+        Returns:
+            float: Среднее оклада
+        """
         return sum(self.currency_to_rur()) / 2
 
 
 class DataSet:
+    """Класс для получения информации из файла csv формата и базовой работы над данными из него
+
+    Attributes:
+        file_name (str): Название csv файла
+        vacancies_objects (list[Vacancy]): Список вакансий полученных из csv файла
+    """
     def __init__(self, file_name):
-        (headers, info) = self._csv_reader(file_name)
-        vacancies = self._csv_filter(headers, info) if len(headers) > 6 else self._small_csv_filter(info)
+        """Инициализирует объект DataSet
+
+        Args:
+            file_name (str): Название файла
+        """
         self.file_name = file_name
+        (headers, info) = self._csv_reader()
+        vacancies = self._csv_filter(headers, info) if len(headers) > 6 else self._small_csv_filter(info)
         self.vacancies_objects = vacancies
 
-    def _csv_reader(self, file_name):
-        with open(file_name, encoding="utf-8-sig") as f:
+    def _csv_reader(self):
+        """Чтение csv файла.
+
+        Returns:
+            tuple[str, str]: Результат чтения из csv файла в виде пары: лист с названиями столбцов,
+             лист с основными данными
+        """
+        with open(self.file_name, encoding="utf-8-sig") as f:
             reader = [x for x in csv.reader(f)]
             headers = reader.pop(0)
             header_len = len(headers)
             info = list(filter(lambda data: '' not in data and len(data) == header_len, reader))
         return headers, info
 
-    def _csv_filter(self, headers, info):
+    @staticmethod
+    def _csv_filter(headers, info):
+        """Преобразование данных из csv файла в список вакансий, в котором каждой вакансии соответствует одна строка
+            из файла
+
+        Args:
+            headers (list[str]): Названия столбцов
+            info (list[list[str]]): Основные данные csv файла
+
+        Returns:
+            list[Vacancy]: Форматированный список вакансий
+        """
         def normalize_info_from_csv(info_cell):
+            """Удаление лишних символов из строки для записи в объект Вакансии (html-тегов и т.д.)
+
+            Args:
+                info_cell (str): Строка для нормализации
+
+            Returns:
+                str: Нормализованная строка
+            """
             temp_info = "__temp__".join(info_cell.split("\n"))
             temp_info = re.sub(r"<[^<>]*>", "", temp_info)
             temp_info = re.sub(r"\s+", " ", temp_info)
@@ -287,7 +609,17 @@ class DataSet:
             vacancies.append(vacancy)
         return vacancies
 
-    def _small_csv_filter(self, info):
+    @staticmethod
+    def _small_csv_filter(info):
+        """Преобразование данных из csv файла в список вакансий, в котором каждой вакансии соответствует одна строка
+            из файла (для статистики)
+
+        Args:
+            info (list[list[str]]): Строки csv файла
+
+        Returns:
+            list[Vacancy]: Форматированный список вакансий
+        """
         vacancies = []
         for info_row in info:
             salary = Salary(info_row[1], info_row[2], None, info_row[3])
@@ -296,17 +628,53 @@ class DataSet:
 
 
 class InputConnect:
-    def info_formatter(self, vacancies):
+    """Класс для работы над списком Vacancy: полное форматирование, нахождения необходимых вакансий
+
+    """
+    @staticmethod
+    def info_formatter(vacancies):
+        """Нормализация данных в вакансиях
+
+        Args:
+            vacancies (list[Vacancy]): Список вакансий
+
+        Returns:
+            list[Vacancy]: Результат форматирования
+        """
         def formatter_string_number(str_num):
+            """Устранение дробных разделителей в строковом числе
+
+            Args:
+                str_num (str): Число для нормализации
+
+            Returns:
+                str: Результат форматирования числа
+            """
             return str_num if str_num.find('.') == -1 else str_num[:len(str_num) - 2]
 
         def formatter_salary(attr_value):
+            """Преобразование оклада в нормированный вид
+
+            Args:
+                attr_value (Salary): Объект оклада
+
+            Returns:
+                Salary: Результат форматирования оклада
+            """
             salary_from = formatter_string_number(attr_value.salary_from)
             salary_to = formatter_string_number(attr_value.salary_to)
             salary_currency = dic_currency[attr_value.salary_currency]
             return Salary(salary_from, salary_to, None, salary_currency)
 
         def formatter_published_at(attr_value):
+            """Получение года из строки, содержащей дату
+
+            Args:
+                attr_value (str): Значение времени публикации вакансии
+
+            Returns:
+                str: Год публикации
+            """
             return attr_value[0:4]
 
         dic_currency = {"AZN": "Манаты", "BYR": "Белорусские рубли", "EUR": "Евро",
@@ -319,8 +687,20 @@ class InputConnect:
         return vacancies
 
     def info_finder(self, vacancies, finder_parameter):
+        """Формирование информации по годам о вакансиях: уровень зарплат по годам, уровень зарплат по годам для
+            выбранной вакансии, количество вакансий по годам, количество вакансий по годам для выбранной вакансии,
+            уровень зарплат по городам, количество вакансий по городам, общее количество вакансий
+
+        Args:
+            vacancies (list[Vacancy]): Список вакансий
+            finder_parameter (str): Название вакансии в качестве параметра фильтрации
+
+        Returns:
+            tuple[ dict[int: tuple[int, int]], dict[int: tuple[int, int]], dict[int: int], dict[int: int],
+             dict[str: tuple[int, int]], dict[str: int], int ]: Результат фильтрации
+        """
         salaries_year_level, selected_salary_year_level, vacancies_year_count, selected_vacancy_year_count, \
-        salaries_city_level, vacancies_city_count = {}, {}, {}, {}, {}, {}
+         salaries_city_level, vacancies_city_count = {}, {}, {}, {}, {}, {}
         for vacancy in vacancies:
             salary = vacancy.salary.get_salary()
             year = int(vacancy.published_at)
@@ -345,11 +725,35 @@ class InputConnect:
                 salaries_city_level[vacancy.area_name] = (sal_ct_lvl[0] + salary, sal_ct_lvl[1] + 1)
                 vacancies_city_count[vacancy.area_name] += 1
         return self._info_calculating(salaries_year_level, selected_salary_year_level, vacancies_year_count,
-                                      selected_vacancy_year_count, salaries_city_level, vacancies_city_count, len(vacancies))
+                                      selected_vacancy_year_count, salaries_city_level, vacancies_city_count,
+                                      len(vacancies))
 
-    def _info_calculating(self, salaries_year_level, selected_salary_year_level, vacancies_year_count,
+    @staticmethod
+    def _info_calculating(salaries_year_level, selected_salary_year_level, vacancies_year_count,
                           selected_vacancy_year_count, salaries_city_level, vacancies_city_count, vacancies_count):
+        """Окончательное форматирование словарей, фильтрация, сортировка, выборка первого десятка для некоторых
+
+        Args:
+            salaries_year_level (dict[int: tuple[int, int]]): Уровень зарплат по годам
+            selected_salary_year_level (dict[int: tuple[int, int]]): Уровень зарплат по годам для выбранной вакансии
+            vacancies_year_count (dict[int: int]): Количество вакансий по годам
+            selected_vacancy_year_count (dict[int: int]): Количество вакансий по годам для выбранной вакансии
+            salaries_city_level (dict[str: tuple[int, int]]): Уровень зарплат по городам
+            vacancies_city_count (dict[str: int]): Количество вакансий по городам
+            vacancies_count (int): Общее количество вакансий
+
+        Returns:
+            str: Результат форматированbя
+        """
         def sort_dict(dictionary):
+            """Сортировка словаря лексикографически
+
+            Args:
+                dictionary (dict[str: int]): Словарь для сортировки
+
+            Returns:
+                dict[str: int]: Отсортированный словарь
+            """
             dict_pairs = [(key, value) for key, value in dictionary.items()]
             dict_pairs.sort(key=cmp_to_key(lambda x, y: -1 if x[1] <= y[1] else 1))
             return dict(dict_pairs)
@@ -357,14 +761,18 @@ class InputConnect:
         (salaries_year_level, selected_salary_year_level, salaries_city_level) = \
             list(map(lambda dictionary:
                 dict(map(lambda dict_pair:
-                    (dict_pair[0], int(dict_pair[1][0] / dict_pair[1][1]) if dict_pair[1][1] != 0 else int(dict_pair[1][0])), dictionary.items())),
+                    (dict_pair[0], int(dict_pair[1][0] / dict_pair[1][1]) if dict_pair[1][1] != 0
+                        else int(dict_pair[1][0])), dictionary.items())),
                 (salaries_year_level, selected_salary_year_level, salaries_city_level)))
-        vacancies_city_count = dict(map(lambda dict_pair: (dict_pair[0], float(f"{dict_pair[1] / vacancies_count:.4f}")), vacancies_city_count.items()))
+        vacancies_city_count = dict(map(lambda dict_pair: (dict_pair[0],
+                                    float(f"{dict_pair[1] / vacancies_count:.4f}")), vacancies_city_count.items()))
         vacancies_city_count = dict(filter(lambda dict_pair: dict_pair[1] >= 0.01, vacancies_city_count.items()))
         vacancies_city_count = sort_dict(vacancies_city_count)
         vacancies_city_count = {k: vacancies_city_count[k] for k in list(vacancies_city_count)[-10:][::-1]}
-        vacancies_city_count = dict(map(lambda dict_pair: (dict_pair[0], f"{round(dict_pair[1] * 100, 2)}%"), vacancies_city_count.items()))
-        salaries_city_level = dict(filter(lambda dict_pair: dict_pair[0] in vacancies_city_count, salaries_city_level.items()))
+        vacancies_city_count = dict(map(lambda dict_pair: (dict_pair[0], f"{round(dict_pair[1] * 100, 2)}%"),
+                                        vacancies_city_count.items()))
+        salaries_city_level = dict(filter(lambda dict_pair: dict_pair[0] in vacancies_city_count,
+                                          salaries_city_level.items()))
         salaries_city_level = sort_dict(salaries_city_level)
         salaries_city_level = {k: salaries_city_level[k] for k in list(salaries_city_level)[-10:][::-1]}
         return salaries_year_level, selected_salary_year_level, vacancies_year_count, \
@@ -372,7 +780,24 @@ class InputConnect:
 
 
 class Report:
+    """Класс для генерации файлов по анализу статистики: графиков, excel таблиц, общего pdf-файла
+
+    Attributes:
+        salaries_year_level (dict[int: tuple[int, int]]): Уровень зарплат по годам
+        selected_salary_year_level (dict[int: tuple[int, int]]): Уровень зарплат по годам для выбранной вакансии
+        vacancies_year_count (dict[int: int]): Количество вакансий по годам
+        selected_vacancy_year_count (dict[int: int]): Количество вакансий по годам для выбранной вакансии
+        salaries_city_level (dict[str: tuple[int, int]]): Уровень зарплат по городам
+        vacancies_city_count (dict[str: int]): Количество вакансий по городам
+    """
     def __init__(self, vacancy_info):
+        """Инициализация объекта Report
+
+        Args:
+            vacancy_info (tuple[dict[int: tuple[int, int]], dict[int: tuple[int, int]], dict[int: int],
+             dict[int: int], dict[str: tuple[int, int]], dict[str: int]]):
+             Все словари созданные методом info_finder класса Input_Connect
+        """
         self.salaries_year_level = vacancy_info[0]
         self.vacancies_year_count = vacancy_info[1]
         self.selected_salary_year_level = vacancy_info[2]
@@ -381,6 +806,11 @@ class Report:
         self.vacancies_city_count = vacancy_info[5]
 
     def generate_excel(self, vacancy_name):
+        """Создание excel-файла основываясь на словарях аттрибутов объекта Report
+
+        Args:
+            vacancy_name (str): Название выбранной вакансии
+        """
         wb = Workbook()
         stats_by_year = wb.worksheets[0]
         stats_by_year.title = "Cтатистика по годам"
@@ -405,7 +835,13 @@ class Report:
         self._slylize_wb(wb)
         wb.save('report.xlsx')
 
-    def _slylize_wb(self, wb):
+    @staticmethod
+    def _slylize_wb(wb):
+        """Стилизация рабочего листа excel-файла
+
+        Args:
+            wb (Workbook): Excel-лист
+        """
         bold_font = Font(bold=True)
         thin = Side(border_style="thin", color="000000")
         outline = Border(top=thin, left=thin, right=thin, bottom=thin)
@@ -416,12 +852,17 @@ class Report:
             for cell in worksheet[1]:
                 cell.font = bold_font
             for column in tuple(worksheet.columns):
-                if column[1].value == None:
+                if column[1].value is None:
                     continue
                 for cell in column:
                     cell.border = outline
 
     def generate_image(self, vacancy_name):
+        """Создание графиков основываясь на словарях аттрибутов объекта Report
+
+        Args:
+            vacancy_name (str): Название выбранной вакансии
+        """
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 7.5), layout='constrained')
         self._generate_salary_year_levels_graph(ax1, vacancy_name)
         self._generate_vacancy_year_count_graph(ax2, vacancy_name)
@@ -430,6 +871,12 @@ class Report:
         plt.savefig('graph.png')
 
     def _generate_salary_year_levels_graph(self, ax, vacancy_name):
+        """Создание графика уровня зарплат по годам
+
+        Args:
+            ax (Ax): Объект графика
+            vacancy_name (str): Название выбранной вакансии
+        """
         ax_labels = self.salaries_year_level.keys()
         x = np.arange(len(ax_labels))
         width = 0.35
@@ -441,6 +888,12 @@ class Report:
         ax.legend(fontsize=8, loc='upper left')
 
     def _generate_vacancy_year_count_graph(self, ax, vacancy_name):
+        """Создание графика количества вакансий по годам
+
+        Args:
+            ax (Ax): Объект графика
+            vacancy_name (str): Название выбранной вакансии
+        """
         ax_labels = self.vacancies_year_count.keys()
         x = np.arange(len(ax_labels))
         width = 0.35
@@ -452,6 +905,11 @@ class Report:
         ax.legend(fontsize=8, loc='upper left')
 
     def _generate_salary_city_levels_graph(self, ax):
+        """Создание графика уровня зарплат по городам
+
+        Args:
+            ax (Ax): Объект графика
+        """
         ax_labels = self.salaries_city_level.keys()
         y_pos = np.arange(len(ax_labels))
         ax.barh(y_pos, self.salaries_city_level.values(), align='center')
@@ -460,6 +918,11 @@ class Report:
         ax.set_title("Уровень зарплат по городам")
 
     def _generate_vacancy_city_count_graph(self, ax):
+        """Создание графика количества вакансий по городам
+
+        Args:
+            ax (Ax): Объект графика
+        """
         ax_labels, values = list(self.vacancies_city_count.keys()), self.vacancies_city_count.values()
         ax_labels.append('Другие')
         values = list(map(lambda value: float(value[:-1]), values))
@@ -468,6 +931,11 @@ class Report:
         ax.set_title("Доля вакансий по городам")
 
     def generate_pdf(self, vacancy_name):
+        """Создание pdf-файла основываясь на словарях аттрибутов объекта Report
+
+        Args:
+            vacancy_name (str): Название выбранной вакансии
+        """
         headers1, headers2, headers3 = (["Год", "Средняя зарплата", f"Средняя зарплата - {vacancy_name}",
                                         "Количество вакансий", f"Количество вакансий - {vacancy_name}"],
                                         ["Город", "Уровень зарплат"], ["Город", "Доля вакансий"])
@@ -481,21 +949,24 @@ class Report:
         env = Environment(loader=FileSystemLoader('.'))
         template = env.get_template("pdf_template.html")
         pdf_template = template.render(graph_name='graph.png',
-                                       vacancy_name=vacancy_name, headers1=headers1, headers2=headers2, headers3=headers3,
-                                       rows1=rows1, rows2=rows2, rows3=rows3)
+                                       vacancy_name=vacancy_name, headers1=headers1, headers2=headers2,
+                                       headers3=headers3, rows1=rows1, rows2=rows2, rows3=rows3)
         config = pdfkit.configuration(wkhtmltopdf=r'C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe')
         options = {'enable-local-file-access': None}
         pdfkit.from_string(pdf_template, 'report.pdf', options=options, configuration=config)
 
 
-#####################################################################################################################################
+######################################################################################################################
 
 
 def get_vacancies():
+    """Получение информации с csv файла в виде таблицы с вакансиями
+
+    """
     input_requests = ["Введите название файла: ", "Введите параметр фильтрации: ", "Введите параметр сортировки: ",
                       "Обратный порядок сортировки (Да / Нет): ", "Введите диапазон вывода: ",
                       "Введите требуемые столбцы: "]
-    input_info = [input(input_request) for input_request in input_requests]
+    input_info: list[str | bool | list[str] | list[int]] = [input(input_request) for input_request in input_requests]
     normalize_result = normalize_input_info(input_info)
     if normalize_result != "Нормализация прошла успешно":
         return normalize_result
@@ -513,6 +984,9 @@ def get_vacancies():
 
 
 def get_statistics():
+    """Получение информации с csv файла и создание графикоа, таблиц и общего pdf-файл со статистикой
+
+    """
     input_requests = ["Введите название файла: ", "Введите название профессии: "]
     input_info = [input(input_request) for input_request in input_requests]
     # input_info = ["vacancies_by_year.csv", "Аналитик"]
@@ -533,6 +1007,9 @@ def get_statistics():
 
 
 def main_function():
+    """Выбор типа анализа данных из csv-файла
+
+    """
     main_input_request = "Выберите тип вывода: "
     main_input_info = input(main_input_request)
     # input_info = ["Вакансии"]
@@ -546,6 +1023,3 @@ def main_function():
 
 
 main_function()
-
-# Hello, World
->>>>>>> develop

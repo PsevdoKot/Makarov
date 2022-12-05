@@ -1,5 +1,10 @@
 .idea/
 venv/
+years/
 vacancies_by_year.csv
 vacancies_medium.csv
 vacancies_empty.csv
+report.xlsx
+graph.png
+report.pdf
+statistics_initial.py

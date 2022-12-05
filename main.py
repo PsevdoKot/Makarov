@@ -1,6 +1,7 @@
-from vacancies import get_vacancies
+# from vacancies import get_vacancies
 from statistics import get_statistics
-
+# from statistics_initial import get_statistics
+# import yappi
 
 def main_function():
     """Выбор типа анализа данных из csv-файла
@@ -12,10 +13,18 @@ def main_function():
     if main_input_info != "Вакансии" and main_input_info != "Статистика":
         print("Введён неправильный тип вывода")
         return
-    if main_input_info == "Вакансии":
-        get_vacancies()
-    else:
-        get_statistics()
+    # if main_input_info == "Вакансии":
+    #     get_vacancies()
+    # else:
+    get_statistics()
 
 if __name__ == '__main__':
     main_function()
+
+
+# yappi.start()
+# func_stats = yappi.get_func_stats()
+# func_stats.print_all()
+# yappi.stop()
+# yappi.clear_stats()
+# python -m cProfile main.py

@@ -1,6 +1,7 @@
 import csv
 import re
 import os
+from collections import abc
 from functools import cmp_to_key
 from prettytable import PrettyTable
 from prettytable import ALL
@@ -47,35 +48,121 @@ def normalize_input_info(input_info):
     return "Нормализация прошла успешно"
 
 
-def csv_reader(file_name):
-    """Чтение csv файла.
+class Vacancy:
+    """Класс для представления вакансии
 
-    Args:
-        file_name (str): Название csv файла для чтения
-
-    Returns:
-        tuple(str): Результат чтения из csv файла в виде пары: лист с названиями столбцов, лист с основными данными
+    Attributes:
+        name (str): Название вакансии
+        description (str):  Описание вакансии
+        key_skills (list[str] | str): Необходимые скиллы для вакансии
+        experience_id (str): Необходимый опыт для вакансии
+        premium (str): Является ли вакансия премиумной
+        employer_name (str): Название компании
+        salary (Salary): Величина оклада
+        area_name (str): Название города
+        published_at (str): Время публикации вакансии
     """
-    with open(file_name, encoding="utf-8-sig") as f:
-        reader = [x for x in csv.reader(f)]
-        headers = reader.pop(0)
-        header_len = len(headers)
-        info = list(filter(lambda data: '' not in data and len(data) == header_len, reader))
-    return headers, info
+    def __init__(self, name, description, key_skills, experience_id, premium,
+                 employer_name, salary, area_name, published_at):
+        """Инициализирует объект Vacancy
+
+        Args:
+            name (str | None):
+            description (str | None):
+            key_skills (list[str] | str | None):
+            experience_id (str | None):
+            premium (str | None):
+            employer_name (str | None):
+            salary (Salary | None):
+            area_name (str | None):
+            published_at (str | None):
+        """
+        self.name = name
+        self.description = description
+        self.key_skills = key_skills
+        self.experience_id = experience_id
+        self.premium = premium
+        self.employer_name = employer_name
+        self.salary = salary
+        self.area_name = area_name
+        self.published_at = published_at
 
 
-def csv_filter(headers, info):
-    """Преобразование данных из csv файла в список словарей, в котором каждому словарю соответствует одна строка
-        из файла (ключ - название столбца)
+class Salary:
+    """Класс для представления оклада
 
-    Args:
-        headers (list[str]): Названия столбцов
-        info (list[list[str]]): Основные данные csv файла
-
-    Returns:
-        list[dict[str,str]]: Список строк в виде словарей
+    Attributes:
+        salary_from (str):
+        salary_to (str):
+        salary_gross (str):
+        salary_currency (str):
     """
-    def normalize_info_from_csv(info_cell):
+    def __init__(self, salary_from, salary_to, salary_gross, salary_currency):
+        """Инициализирует объект Salary
+
+        Args:
+            salary_from (str):
+            salary_to (str):
+            salary_gross (any):
+            salary_currency (str):
+        """
+        self.salary_from = salary_from
+        self.salary_to = salary_to
+        self.salary_gross = salary_gross
+        self.salary_currency = salary_currency
+
+    def currency_to_rur(self):
+        """Переводит верхнюю и нижнюю вилки оклада в рубли
+
+        Returns:
+            list[int,int]: Верхняя и нижняя вилки оклада в рублях
+        """
+        dic_currency_to_rub = {"Манаты": 35.68, "Белорусские рубли": 23.91, "Евро": 59.90, "Грузинский лари": 21.74,
+                               "Киргизский сом": 0.76, "Тенге": 0.13, "Рубли": 1, "Гривны": 1.64, "Доллары": 60.66,
+                               "Узбекский сум": 0.0055}
+        return list(map(lambda x: int(x.replace(' ', '')) * dic_currency_to_rub[self.salary_currency],
+                        (self.salary_from, self.salary_to)))
+
+
+class DataSet:
+    """Класс для получения информации из файла csv формата и базовой работы над данными из него
+
+    Attributes:
+        file_name (str): Название csv файла
+        vacancies_objects (list[Vacancy]): Список вакансий полученных из csv файла
+    """
+    def __init__(self, file_name):
+        """Инициализирует объект DataSet
+
+        Args:
+            file_name (str | None): Название файла
+        """
+        if (file_name == None):
+            return
+        (headers, info) = self._csv_reader(file_name)
+        vacancies = self._create_vacancies(headers, info)
+        self.file_name = file_name
+        self.vacancies_objects = vacancies
+
+    @staticmethod
+    def _csv_reader(file_name):
+        """Чтение csv файла.
+
+        Args:
+            file_name (str): Название csv файла для чтения
+
+        Returns:
+            tuple[str, str]: Результат чтения из csv файла в виде пары: лист с названиями столбцов,
+                лист с основными данными
+        """
+        with open(file_name, encoding="utf-8-sig") as f:
+            reader = [x for x in csv.reader(f)]
+            headers = reader.pop(0)
+            header_len = len(headers)
+            info = list(filter(lambda data: '' not in data and len(data) == header_len, reader))
+        return headers, info
+
+    def _csv_filter(self, info_cell):
         """Удаление лишних символов из элемента словаря (html-тегов и т.д.)
 
         Args:
@@ -89,372 +176,352 @@ def csv_filter(headers, info):
         temp_info = re.sub(r"\s+", " ", temp_info)
         return str.strip(temp_info)
 
-    info_dictionaries = []
-    for info_row in info:
-        info_dictionary = {}
-        for i in range(len(headers)):
-            info_dictionary[headers[i]] = normalize_info_from_csv(info_row[i])
-        info_dictionaries.append(info_dictionary)
-    return info_dictionaries
-
-
-def info_formatter(info_dictionaries):
-    """Преобразование данных из csv файла к визуально приятному виду
+    def _create_vacancies(self, headers, info):
+        """Преобразование прочитанных данных из csv файла в список вакансий, в котором каждой вакансии соответствует
+            одна строка из csv файла
 
         Args:
-            info_dictionaries (list[dict[str,str]]): список словарей строк csv файла
+            headers (list[str]): Названия столбцов csv файла
+            info (list[list[str]]): Основные данные csv файла
 
         Returns:
-            list[dict[str,str]]: Результат форматирования
-    """
-    def formatter_string_number(str_num):
-        """Устранение дробных разделителей в числе и расстановка пробелов между тысячными долями числа
+            list[Vacancy]: Список строк в виде словарей
+        """
+        vacancies = []
+        for info_row in info:
+            info_list = list(map(lambda x: self._csv_filter(info_row[x]), range(len(headers))))
+            salary = Salary(info_list[6], info_list[7], info_list[8], info_list[9])
+            key_skills = info_list[2].split('__temp__')
+            vacancy = Vacancy(info_list[0], info_list[1], key_skills, info_list[3], info_list[4],
+                              info_list[5], salary, info_list[10], info_list[11])
+            vacancies.append(vacancy)
+        return vacancies
+
+
+class InputConnect:
+    @staticmethod
+    def info_formatter(vacancies):
+        """Нормализация данных в вакансиях
 
         Args:
-            str_num (str): Число для нормализации
+            vacancies (list[Vacancy] | Vacancy): Список вакансий
 
         Returns:
-            str: Результат форматирования числа
+            list[Vacancy] | Vacancy: Результат форматирования
         """
-        num = int(str_num if str_num.find('.') == -1 else str_num[:len(str_num) - 2])
-        str_num_reverse = str(num)[::-1]
-        return ' '.join(str_num_reverse[i:i + 3] for i in range(0, len(str_num_reverse), 3))[::-1]
+        def formatter_string_number(str_num):
+            """Устранение дробных разделителей в строковом числе
 
-    def formatter_experience_id(new_info_dictionary, value, key):
-        """Преобразование опыта работы, написанный на английском, в соответствующий русский вариант
-            и запись в словарь результата
+            Args:
+                str_num (str): Число для нормализации
+
+            Returns:
+                str: Результат форматирования числа
+            """
+            num = int(str_num if str_num.find('.') == -1 else str_num[:len(str_num) - 2])
+            str_num_reverse = str(num)[::-1]
+            return ' '.join(str_num_reverse[i:i + 3] for i in range(0, len(str_num_reverse), 3))[::-1]
+
+        def formatter_experience_id(attr_value):
+            """Преобразование оклада в нормированный вид
+
+            Args:
+                attr_value (Salary): Объект оклада
+
+            Returns:
+                Salary: Результат форматирования оклада
+            """
+            return dic_experience[attr_value]
+
+        def formatter_salary(attr_value):
+            """Преобразование оклада в нормированный вид
+
+            Args:
+                attr_value (Salary): Объект оклада
+
+            Returns:
+                Salary: Результат форматирования оклада
+            """
+            salary_from = formatter_string_number(attr_value.salary_from)
+            salary_to = formatter_string_number(attr_value.salary_to)
+            salary_gross = attr_value.salary_gross
+            salary_gross = 'Без вычета налогов' if salary_gross == 'True' else 'С вычетом налогов' \
+                if salary_gross == 'False' else salary_gross
+            salary_currency = dic_currency[attr_value.salary_currency]
+            return Salary(salary_from, salary_to, salary_gross, salary_currency)
+
+        def formatter_published_at(attr_value):
+            """Удаление времени и часового пояса из даты
+
+            Args:
+                attr_value (str): Значение времени публикации вакансии
+
+            Returns:
+                str: Отформатированная дата публикации
+            """
+            return f"{attr_value}#{attr_value[8:10]}.{attr_value[5:7]}.{attr_value[0:4]}"
+
+        def formatter_premium(attr_value):
+            """Преобразование значения премиумности вакансии, написанный на английском, в соответствующий
+                русский вариант и запись в словарь результата
+
+            Args:
+                attr_value (str): Значение времени публикации вакансии
+
+            Returns:
+                str: Отформатированные значение премиумности
+            """
+            return 'Да' if attr_value == 'True' else 'Нет'
+
+        def formatter_key_skills(attr_value):
+            """Соединение листа скиллов в одну строку и обрезание по количеству
+
+            Args:
+                attr_value (list[str]): Значение времени публикации вакансии
+
+            Returns:
+                str: Отформатированные скиллы
+            """
+            if not isinstance(attr_value, str):
+                value = '\n'.join(attr_value)
+                value = formatter_standard_field_value(value)
+                return f"{len(attr_value)}#{value}"
+            line_count = attr_value.count('\n') + 1
+            value = formatter_standard_field_value(attr_value)
+            return f"{line_count}#{value}"
+
+        def formatter_standard_field_value(attr_value):
+            """Получение первых 100 символов строки
+
+            Args:
+                attr_value (str): Значение, которое нужно обрезать
+
+            Returns:
+                str: Отформатированная строка
+            """
+            return f"{attr_value[0:100]}..." if len(attr_value) > 100 else attr_value
+
+        dic_experience = {"noExperience": "Нет опыта", "between1And3": "От 1 года до 3 лет",
+                          "between3And6": "От 3 до 6 лет", "moreThan6": "Более 6 лет"}
+        dic_currency = {"AZN": "Манаты", "BYR": "Белорусские рубли", "EUR": "Евро",
+                        "GEL": "Грузинский лари", "KGS": "Киргизский сом", "KZT": "Тенге", "RUR": "Рубли",
+                        "UAH": "Гривны", "USD": "Доллары", "UZS": "Узбекский сум"}
+        dic_func = {"experience_id": formatter_experience_id, "salary": formatter_salary,
+                    "published_at": formatter_published_at,
+                    "premium": formatter_premium, "key_skills": formatter_key_skills,
+                    "name": formatter_standard_field_value, "description": formatter_standard_field_value,
+                    "employer_name": formatter_standard_field_value, "area_name": formatter_standard_field_value}
+
+        for vacancy in vacancies:
+            attrs = [a for a in dir(vacancy) if not a.startswith('__') and not callable(getattr(vacancy, a))]
+            for attr in attrs:
+                setattr(vacancy, attr, dic_func[attr](getattr(vacancy, attr)))
+        return vacancies
+
+    @staticmethod
+    def info_filter(vacancies, filtering_parameter):
+        """Фильтрация списка вакансий, соответствующих строкам csv файла
 
         Args:
-            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
-            value (str): Английский вариант написания
-            key (str): Ключ для записи в список словарей нового значения
-        """
-        new_info_dictionary["Опыт работы"] = dic_experience[value]
-
-    def formatter_salary_from(new_info_dictionary, value, key):
-        """Преобразование нижней линии оклада в нормированный вид и запись в словарь результата
-
-        Args:
-            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
-            value (str): Значение оклада
-            key (str): Ключ для записи в список словарей нового значения
-        """
-        new_info_dictionary['Оклад'] = formatter_string_number(value)
-
-    def formatter_salary_to(new_info_dictionary, value, key):
-        """Преобразование верхней линии оклада в нормированный вид и запись в словарь результата
-
-        Args:
-            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
-            value (str): Значение оклада
-            key (str): Ключ для записи в список словарей нового значения
-        """
-        new_info_dictionary['Оклад'] = f"{new_info_dictionary['Оклад']} - {formatter_string_number(value)}"
-
-    def formatter_salary_currency(new_info_dictionary, value, key):
-        """Преобразование валюты, написанный на английском, в соответствующий русский вариант
-            и запись в словарь результата
-
-        Args:
-            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
-            value (str): Английский вариант написания
-            key (str): Ключ для записи в список словарей нового значения
-        """
-        new_info_dictionary["Оклад"] = f"{new_info_dictionary['Оклад']} ({dic_currency[value]})" \
-                                       f" ({new_info_dictionary['salary_currency']})"
-
-    def formatter_salary_gross(new_info_dictionary, value, key):
-        """Преобразование значения вычета налогов, написанный на английском, в соответствующий русский вариант
-            и запись в словарь результата
-
-        Args:
-            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
-            value (str): Английский вариант написания
-            key (str): Ключ для записи в список словарей нового значения
-        """
-        new_info_dictionary['salary_currency'] = 'Без вычета налогов' if value == 'True' \
-            else 'С вычетом налогов' if value == 'False' else value
-
-    def formatter_published_at(new_info_dictionary, value, key):
-        """Преобразование времени выкладывания вакансии в формат ДД:ММ:ГГ и запись в словарь результата
-
-        Args:
-            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
-            value (str): Значение времени выкладывания вакансии для форматирования
-            key (str): Ключ для записи в список словарей нового значения
-        """
-        new_info_dictionary["Дата публикации вакансии"] = f"{value}#{value[8:10]}.{value[5:7]}.{value[0:4]}"
-
-    def formatter_premium(new_info_dictionary, value, key):
-        """Преобразование значений премиумности вакансии, написанный на английском, в соответствующий русский вариант
-             и запись в словарь результата
-
-        Args:
-            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
-            value (str): Английский вариант написания
-            key (str): Ключ для записи в список словарей нового значения
-        """
-        new_info_dictionary["Премиум-вакансия"] = 'Да' if value == 'True' else 'Нет'
-
-    def formatter_key_skills(new_info_dictionary, value, key):
-        """Преобразование требуемых скиллов, написанных на английском, в соответствующий русский вариант
-            и запись в словарь результата
-
-        Args:
-            new_info_dictionary (dict[str,str | int]): Новый список словарей для результата общего метода
-            value (str): Английский вариант написания
-            key (str): Ключ для записи в список словарей нового значения
-        """
-        value = value.replace("__temp__", '\n')
-        new_info_dictionary["Количество навыков"] = value.count('\n') + 1
-        new_info_dictionary["Навыки"] = f"{value[0:100]}..." if len(value) > 100 else value
-
-    def formatter_standard_field_value(new_info_dictionary, value, key):
-        """Получение только первых 100 символов строки и запись в словарь результата
-
-        Args:
-            new_info_dictionary (dict[str,str]): Новый список словарей для результата общего метода
-            value (str): Строка для форматирования
-            key (str): Ключ для записи в список словарей нового значения
-        """
-        new_info_dictionary[dic_naming[key]] = f"{value[0:100]}..." if len(value) > 100 else value
-
-    dic_naming = {"name": "Название", "description": "Описание", "employer_name": "Компания",
-                  "area_name": "Название региона"}
-    dic_experience = {"noExperience": "Нет опыта", "between1And3": "От 1 года до 3 лет",
-                      "between3And6": "От 3 до 6 лет", "moreThan6": "Более 6 лет"}
-    dic_currency = {"AZN": "Манаты", "BYR": "Белорусские рубли", "EUR": "Евро",
-                    "GEL": "Грузинский лари", "KGS": "Киргизский сом", "KZT": "Тенге", "RUR": "Рубли",
-                    "UAH": "Гривны", "USD": "Доллары", "UZS": "Узбекский сум"}
-    dic_func = {"experience_id": formatter_experience_id, "salary_from": formatter_salary_from,
-                "salary_to": formatter_salary_to, "salary_currency": formatter_salary_currency,
-                "salary_gross": formatter_salary_gross, "published_at": formatter_published_at,
-                "premium": formatter_premium, "key_skills": formatter_key_skills,
-                "name": formatter_standard_field_value, "description": formatter_standard_field_value,
-                "employer_name": formatter_standard_field_value, "area_name": formatter_standard_field_value}
-
-    formatted_info_dictionaries = []
-    for info_dictionary in info_dictionaries:
-        formatted_info_dictionary = {}
-        for item_key, item_value in info_dictionary.items():
-            dic_func[item_key](formatted_info_dictionary, item_value, item_key)
-        if 'salary_currency' in formatted_info_dictionary:
-            formatted_info_dictionary.pop('salary_currency')
-        formatted_info_dictionaries.append(formatted_info_dictionary)
-    return formatted_info_dictionaries
-
-
-def info_filter(info_dictionaries, filtering_parameter):
-    """Фильтрация списка словарей, соответствующих строкам csv файла
-
-        Args:
-            info_dictionaries (list[dict[str,str]]): Список словарей для фильтрации
+            vacancies (list[Vacancy] | Vacancy): Список вакансий для фильтрации
             filtering_parameter (list[str,str]): Параметр фильтрации
 
         Returns:
-            list[dict[str,str]]: Результат фильтрации
-    """
-    def filter_verbatim(dic, field_value_should):
-        """Лексикографическое сравнивание значения из словаря с требуемым значением
-
-        Args:
-            dic (dict[str,str]): Словарь, представляющий собой одну строку csv файла
-            field_value_should (tuple[str, str]): Ключ словаря для фильтрации и соответсвующее требуемое значение
-
-        Returns:
-            string: Результат сравнения
+            list[Vacancy] | Vacancy: Результат фильтрации
         """
-        return dic[field_value_should[0]] == field_value_should[1]
+        def filter_verbatim(vacancy, field_should):
+            """Лексикографическое сравнивание значения из объекта вакансии с требуемым значением
 
-    def filter_key_skills(dic, field_value_should):
-        """Уникальное сравнивание значения скиллов из словаря с требуемым значением
+            Args:
+                vacancy (Vacancy): Объекта вакансии
+                field_should (tuple[str, str]): Аттрибут объекта вакансии и требуемым значением
+
+            Returns:
+                bool: Результат сравнения
+            """
+            return getattr(vacancy, dic_naming[field_should[0]]) == field_should[1]
+
+        def filter_key_skills(vacancy, field_should):
+            """Cравнение значения скиллов из объекта вакансии с требуемым значением
+
+            Args:
+                vacancy (Vacancy): Объекта вакансии
+                field_should (tuple[str, str]): Аттрибут объекта вакансии и требуемым значением
+
+            Returns:
+                bool: Результат сравнения
+            """
+            values_should = field_should[1].split(', ')
+            key_skills = vacancy.key_skills[vacancy.key_skills.find('#') + 1:]\
+                .replace(', ', '\n').replace('...', '\n').split('\n')
+            return all(list(map(lambda value_should: value_should in key_skills, values_should)))
+
+        def filter_salary(vacancy, field_should):
+            """Сравнение значения оклада из объекта вакансии с требуемым значением
+
+            Args:
+                vacancy (Vacancy): Объекта вакансии
+                field_should (tuple[str, str]): Аттрибут объекта вакансии и требуемым значением
+
+            Returns:
+                bool: Результат сравнения
+            """
+            salary = vacancy.salary
+            return int(salary.salary_from.replace(' ', '')) <= int(field_should[1]) <= int(salary.salary_to
+                                                                                           .replace(' ', ''))
+
+        def filter_salary_currency(vacancy, field_should):
+            """Сравнение значения валюты оклада из объекта вакансии с требуемым значением
+
+            Args:
+                vacancy (Vacancy): Объекта вакансии
+                field_should (tuple[str, str]): Аттрибут объекта вакансии и требуемым значением
+
+            Returns:
+                bool: Результат сравнения
+            """
+            return vacancy.salary.salary_currency == field_should[1]
+
+        def filter_published_at(vacancy, field_should):
+            """Сравнение значения времени публикации из объекта вакансии с требуемым значением
+
+            Args:
+                vacancy (Vacancy): Объекта вакансии
+                field_should (tuple[str, str]): Аттрибут объекта вакансии и требуемым значением
+
+            Returns:
+                bool: Результат сравнения
+            """
+            value = vacancy.published_at
+            return value[value.find('#') + 1:] == field_should[1]
+
+        dic_naming = {"Название": "name", "Описание": "description", "Опыт работы": "experience_id",
+                      "Премиум-вакансия": "premium", "Компания": "employer_name", "Название региона": "area_name"}
+        dic_filter = {"Название": filter_verbatim, "Описание": filter_verbatim, "Навыки": filter_key_skills,
+                      "Опыт работы": filter_verbatim, "Премиум-вакансия": filter_verbatim, "Компания": filter_verbatim,
+                      "Оклад": filter_salary, "Дата публикации вакансии": filter_published_at,
+                      "Идентификатор валюты оклада": filter_salary_currency, "Название региона": filter_verbatim}
+
+        return list(filter(lambda vacancy: filtering_parameter[0] == "None"
+                                    or dic_filter[filtering_parameter[0]](vacancy, filtering_parameter), vacancies))
+
+    @staticmethod
+    def info_sorter(vacancies, sort_field, reverse_sort):
+        """Сортировка списка вакансий, представляющих собой строки файла csv формата
 
         Args:
-            dic (dict[str,str]): Словарь, представляющий собой одну строку csv файла
-            field_value_should (tuple[str, str]): Ключ словаря для фильтрации и соответсвующее требуемое значение
-
-        Returns:
-            string: Результат сравнения
-        """
-        value_should = field_value_should[1].split(', ')
-        dic_values = dic['Навыки'].replace(', ', '\n').replace('...', '\n').split('\n')
-        return all(list(map(lambda value_should: value_should in dic_values, value_should)))
-
-    def filter_salary(dic, field_value_should):
-        """Уникальное сравнивание значения оклада из словаря с требуемым значением
-
-        Args:
-            dic (dict[str,str]): Словарь, представляющий собой одну строку csv файла
-            field_value_should (tuple[str, str]): Ключ словаря для фильтрации и соответсвующее требуемое значение
-
-        Returns:
-            string: Результат сравнения
-        """
-        dic_value = dic["Оклад"]
-        salary_area = dic_value[:dic_value.find('(')].replace(' ', '').split('-')
-        return int(salary_area[0]) <= int(field_value_should[1]) <= int(salary_area[1])
-
-    def filter_salary_currency(dic, field_value_should):
-        """Уникальное сравнивание значения валюты оклада из словаря с требуемым значением
-
-        Args:
-            dic (dict[str,str]): Словарь, представляющий собой одну строку csv файла
-            field_value_should (tuple[str, str]): Ключ словаря для фильтрации и соответсвующее требуемое значение
-
-        Returns:
-            string: Результат сравнения
-        """
-        dic_value = dic["Оклад"]
-        temp = dic_value[dic_value.find('(') + 1:dic_value.find(')')]
-        return temp == field_value_should[1]
-
-    def filter_published_at(dic, field_value_should):
-        """Уникальное сравнивание значения времени публикации из словаря с требуемым значением
-
-        Args:
-            dic (dict[str,str]): Словарь, представляющий собой одну строку csv файла
-            field_value_should (tuple[str, str]): Ключ словаря для фильтрации и соответсвующее требуемое значение
-
-        Returns:
-            string: Результат сравнения
-        """
-        dic_value = dic["Дата публикации вакансии"]
-        return dic_value[dic_value.find('#') + 1:] == field_value_should[1]
-
-    dic_filter = {"Название": filter_verbatim, "Описание": filter_verbatim, "Навыки": filter_key_skills,
-                  "Опыт работы": filter_verbatim, "Премиум-вакансия": filter_verbatim, "Компания": filter_verbatim,
-                  "Оклад": filter_salary, "Дата публикации вакансии": filter_published_at,
-                  "Идентификатор валюты оклада": filter_salary_currency, "Название региона": filter_verbatim}
-
-    return list(filter(lambda info_dictionary:
-                       filtering_parameter[0] == "None" or
-                       dic_filter[filtering_parameter[0]](info_dictionary, filtering_parameter), info_dictionaries))
-
-
-def info_sorter(info_dictionaries, sort_field, reverse_sort):
-    """Сортировка списка словарей, представляющих собой строки файла csv формата
-
-        Args:
-            info_dictionaries (list[dict[str,str]]): Данные для сортировки
+            vacancies (list[Vacancy]): Данные для сортировки
             sort_field (str): Параметр сортировки
             reverse_sort (bool): Сортировать ли в обратном порядке
 
         Returns:
-            list[dict[str,str]]: Результат сортировки
-    """
-    def lexcographic_sorter(row1, row2):
-        """Лексикографическое сравнение одного словаря с другим по параметру сортировки
-
-        Args:
-            row1 (dict[str,str]): Первый словаря для сравнения
-            row2 (dict[str,str]): Первый словаря для сравнения
-
-        Returns:
-            int: Результат сравнения
+            list[Vacancy]: Результат сортировки
         """
-        return 1 if row1[sort_field] >= row2[sort_field] else -1
-
-    def key_skills_sorter(row1, row2):
-        """Сравнение одного словаря с другим по количеству навыков
-
-        Args:
-            row1 (dict[str,str]): Первый словаря для сравнения
-            row2 (dict[str,str]): Первый словаря для сравнения
-
-        Returns:
-            int: Результат сравнения
-        """
-        (row1_len, row2_len) = list(map(lambda row: row["Количество навыков"], (row1, row2)))
-        return row1_len - row2_len
-
-    def experience_sorter(row1, row2):
-        """Сравнение одного словаря с другим по количеству требуемых лет опыта
-
-        Args:
-            row1 (dict[str,str]): Первый словаря для сравнения
-            row2 (dict[str,str]): Первый словаря для сравнения
-
-        Returns:
-            int: Результат сравнения
-        """
-        def find_first_num(row_value):
-            """Получение первого числа в строке
+        def lexicographic_sorter(vacancy1, vacancy2):
+            """Лексикографическое сравнение одного объекта вакансии с другим по параметру сортировки
 
             Args:
-                row_value (str): Строка для поиска
+                vacancy1 (Vacancy): Первый объект вакансии для сравнения
+                vacancy2 (Vacancy): Первый объект вакансии для сравнения
 
             Returns:
                 int: Результат сравнения
             """
-            row_num = list(filter(lambda char: char.isdigit(), row_value))
-            return int(row_num[0]) if len(row_num) > 0 else 0
-        (row1_num, row2_num) = list(map(lambda row: find_first_num(row["Опыт работы"]), (row1, row2)))
-        return row1_num - row2_num
+            return 1 if getattr(vacancy1, dic_naming[sort_field]) >= getattr(vacancy2, dic_naming[sort_field]) else -1
 
-    def salary_sorter(row1, row2):
-        """Сравнение одного словаря с другим по окладу
-
-        Args:
-            row1 (dict[str,str]): Первый словаря для сравнения
-            row2 (dict[str,str]): Первый словаря для сравнения
-
-        Returns:
-            int: Результат сравнения
-        """
-        def salary_process(row):
-            """Вычисление среднего значения оклада
+        def key_skills_sorter(vacancy1, vacancy2):
+            """Сравнение одного объекта вакансии с другим по количеству навыков
 
             Args:
-                row (dict[str,str]): Словарь, представляющий собой строку csv файла
+                vacancy1 (Vacancy): Первый объект вакансии для сравнения
+                vacancy2 (Vacancy): Первый объект вакансии для сравнения
 
             Returns:
-                int: Среднее оклада
+                int: Результат сравнения
             """
-            dic_currency_to_rub = {"Манаты": 35.68, "Белорусские рубли": 23.91, "Евро": 59.90, "Грузинский лари": 21.74,
-                                   "Киргизский сом": 0.76, "Тенге": 0.13, "Рубли": 1, "Гривны": 1.64, "Доллары": 60.66,
-                                   "Узбекский сум": 0.0055}
-            string_nums = row[sort_field].split(' - ')
-            salary_currency = row[sort_field][row[sort_field].find('(') + 1:row[sort_field].find(')')]
-            string_nums[1] = string_nums[1][:string_nums[1].find(' (')]
-            nums = list(map(lambda string_num: int(string_num.replace(' ', '')), string_nums))
-            rub_nums = list(map(lambda num: num * dic_currency_to_rub[salary_currency], nums))
-            return sum(rub_nums) / 2
-        (row1_salary, row2_salary) = list(map(lambda row: salary_process(row), (row1, row2)))
-        return row1_salary - row2_salary
+            (vacancy1_count, vacancy2_count) = list(map(
+                lambda vacancy: int(vacancy.key_skills[:vacancy.key_skills.find('#')]), (vacancy1, vacancy2)))
+            return vacancy1_count - vacancy2_count
 
-    dic_sorter = {"Название": lexcographic_sorter, "Описание": lexcographic_sorter, "Навыки": key_skills_sorter,
-                  "Опыт работы": experience_sorter, "Премиум-вакансия": lexcographic_sorter,
-                  "Компания": lexcographic_sorter, "Оклад": salary_sorter, "Название региона": lexcographic_sorter,
-                  "Дата публикации вакансии": lexcographic_sorter}
+        def experience_sorter(vacancy1, vacancy2):
+            """Сравнение одного объекта вакансии с другим по количеству требуемых лет опыта
 
-    info_dictionaries.sort(key=cmp_to_key(dic_sorter[sort_field]), reverse=reverse_sort)
+            Args:
+                vacancy1 (Vacancy): Первый объект вакансии для сравнения
+                vacancy2 (Vacancy): Первый объект вакансии для сравнения
 
-    return info_dictionaries
+            Returns:
+                int: Результат сравнения
+            """
+            def find_first_num(row_value):
+                """Получение первого числа в строке
 
+                Args:
+                    row_value (str): Строка для поиска
 
-def print_vacancies(info_dictionaries, start_end_nums, table_fields):
-    """Печать талицы с вакансиями
+                Returns:
+                    int: Результат поиска числа
+                """
+                row_num = list(filter(lambda char: char.isdigit(), row_value))
+                return int(row_num[0]) if len(row_num) > 0 else 0
 
-    Args:
-        info_dictionaries (list[dict[str,str]]): Список словарей, соответствующих строкам файла csv формата
-        start_end_nums (list[int, int]): От и до какого номера включать вакансии в таблицу
-        table_fields (list[str]): Название столбцов для вывода в таблицу
-    """
-    info_table = PrettyTable(["Название", "Описание", "Навыки", "Опыт работы", "Премиум-вакансия",
-                              "Компания", "Оклад", "Название региона", "Дата публикации вакансии"])
-    for info_dictionary in info_dictionaries:
-        values = list(map(lambda key: info_dictionary[key], info_dictionary))
-        values.pop(2)
-        info_table.add_row(values)
-    published_at_data = list(filter(lambda x: x != '', info_table.get_string(
-        fields=["Дата публикации вакансии"], border=False, header=False).replace(' ', '').split('\n')))
-    info_table.del_column("Дата публикации вакансии")
-    info_table.add_column("Дата публикации вакансии", list(map(lambda x: x[x.find('#') + 1:], published_at_data)))
-    info_table.add_autoindex('№')
-    info_table.hrules = ALL
-    info_table.align = 'l'
-    info_table.max_width = 20
-    print(info_table.get_string(start=start_end_nums[0], end=start_end_nums[1], fields=table_fields))
+            (row1_num, row2_num) = list(map(
+                lambda vacancy: find_first_num(vacancy.experience_id), (vacancy1, vacancy2)))
+            return row1_num - row2_num
+
+        def salary_sorter(vacancy1, vacancy2):
+            """Сравнение одного объекта вакансии с другим по окладу
+
+            Args:
+                vacancy1 (Vacancy): Первый объект вакансии для сравнения
+                vacancy2 (Vacancy): Первый объект вакансии для сравнения
+
+            Returns:
+                int: Результат сравнения
+            """
+            (vacancy1_salary, vacancy2_salary) = list(map(
+                lambda vacancy: sum(vacancy.salary.currency_to_rur()) / 2, (vacancy1, vacancy2)))
+            return vacancy1_salary - vacancy2_salary
+
+        dic_naming = {"Название": "name", "Описание": "description", "Дата публикации вакансии": "published_at",
+                      "Премиум-вакансия": "premium", "Компания": "employer_name", "Название региона": "area_name"}
+        dic_sorter = {"Название": lexicographic_sorter, "Описание": lexicographic_sorter, "Навыки": key_skills_sorter,
+                      "Опыт работы": experience_sorter, "Премиум-вакансия": lexicographic_sorter,
+                      "Компания": lexicographic_sorter, "Оклад": salary_sorter, "Название региона": lexicographic_sorter,
+                      "Дата публикации вакансии": lexicographic_sorter}
+
+        vacancies.sort(key=cmp_to_key(dic_sorter[sort_field]), reverse=reverse_sort)
+
+        return vacancies
+
+    @staticmethod
+    def print_vacancies(vacancies, start_end_nums, table_fields):
+        """Печать талицы с вакансиями
+
+        Args:
+            vacancies (list[Vacancy]): Список вакансий, соответствующих строкам файла csv формата
+            start_end_nums (list[int, int]): От и до какого номера включать вакансии в таблицу
+            table_fields (list[str]): Название столбцов для вывода в таблицу
+        """
+        dic_naming = {"name": "Название", "description": "Описание", "key_skills": "Навыки",
+                      "experience_id": "Опыт работы", "premium": "Премиум-вакансия", "employer_name": "Компания",
+                      "salary": "Оклад", "area_name": "Название региона", "published_at": "Дата публикации вакансии"}
+        info_table = PrettyTable(list(map(lambda key: dic_naming[key], dic_naming.keys())))
+        for vacancy in vacancies:
+            values = list(map(lambda attr: getattr(vacancy, attr), dic_naming.keys()))
+            skills = values.pop(2)
+            values.insert(2, skills[skills.find('#') + 1:])
+            salary = values.pop(6)
+            values.insert(6, f"{salary.salary_from} - {salary.salary_to}"
+                             f" ({salary.salary_currency}) ({salary.salary_gross})")
+            date = values.pop(8)
+            values.insert(8, date[date.find('#') + 1:])
+            info_table.add_row(values)
+        info_table.add_autoindex('№')
+        info_table.hrules = ALL
+        info_table.align = 'l'
+        info_table.max_width = 20
+        print(info_table.get_string(start=start_end_nums[0], end=start_end_nums[1], fields=table_fields))
 
 
 ######################################################################################################################
@@ -468,17 +535,20 @@ def get_vacancies():
                       "Обратный порядок сортировки (Да / Нет): ", "Введите диапазон вывода: ",
                       "Введите требуемые столбцы: "]
     input_info: list[str | bool | list[str] | list[int]] = [input(input_request) for input_request in input_requests]
+    # input_info = ["vacancies.csv", "Навыки: Git, Linux", "", "", "",
+    #               ""]
     normalize_result = normalize_input_info(input_info)
     if normalize_result != "Нормализация прошла успешно":
         return normalize_result
-    (headers, info) = csv_reader(input_info[0])
-    filtered_csv_data = csv_filter(headers, info)
-    if len(filtered_csv_data) == 0:
+    data_set = DataSet(input_info[0])
+    vacancies = data_set.vacancies_objects
+    if len(vacancies) == 0:
         return "Нет данных"
-    formatted_info = info_formatter(filtered_csv_data)
-    filtered_info = info_filter(formatted_info, input_info[1])
+    input_connect = InputConnect()
+    formatted_info = input_connect.info_formatter(vacancies)
+    filtered_info = input_connect.info_filter(formatted_info, input_info[1])
     if len(filtered_info) == 0:
         return "Ничего не найдено"
     if input_info[2] != '№':
-        filtered_info = info_sorter(filtered_info, input_info[2], input_info[3])
-    print_vacancies(filtered_info, input_info[4], input_info[5])
+        filtered_info = input_connect.info_sorter(filtered_info, input_info[2], input_info[3])
+    input_connect.print_vacancies(filtered_info, input_info[4], input_info[5])

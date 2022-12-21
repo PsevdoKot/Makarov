@@ -1,15 +1,20 @@
 import csv
 import operator
 import multiprocessing
+from time import sleep
 import pdfkit
+import requests
+import csv
 import numpy as np
 import matplotlib.pyplot as plt
+import xml.etree.ElementTree as ET
 from os import listdir, stat
 from os.path import isfile, join
 from functools import reduce, cmp_to_key
 from openpyxl import Workbook
 from openpyxl.styles import Font, Border, Side
 from jinja2 import Environment, FileSystemLoader
+from locale import atof, setlocale, LC_NUMERIC
 
 
 class Vacancy:
@@ -22,7 +27,7 @@ class Vacancy:
         experience_id (str): Необходимый опыт для вакансии
         premium (str): Является ли вакансия премиумной
         employer_name (str): Название компании
-        salary (Salary): Величина оклада
+        salary (str | float): Величина оклада
         area_name (str): Название города
         published_at (str): Время публикации вакансии
     """
@@ -37,7 +42,7 @@ class Vacancy:
             experience_id (str | None):
             premium (str | None):
             employer_name (str | None):
-            salary (Salary):
+            salary (str | float):
             area_name (str):
             published_at (str):
         """
@@ -52,126 +57,212 @@ class Vacancy:
         self.published_at = published_at
 
 
-class Salary:
-    """Класс для представления оклада
+# class Salary:
+#     """Класс для представления оклада
+#
+#     Attributes:
+#         salary_from (str):
+#         salary_to (str):
+#         salary_gross (str):
+#         salary_currency (str):
+#     """
+#     def __init__(self, salary_from, salary_to, salary_gross, salary_currency):
+#         """Инициализирует объект Salary
+#
+#         Args:
+#             salary_from (str):
+#             salary_to (str):
+#             salary_gross (any):
+#             salary_currency (str):
+#         """
+#         self.salary_from = salary_from
+#         self.salary_to = salary_to
+#         self.salary_gross = salary_gross
+#         self.salary_currency = salary_currency
+#
+#     def currency_to_rur(self):
+#         """Переводит верхнюю и нижнюю вилки оклада в рубли
+#
+#         Returns:
+#             list[int,int]: Верхняя и нижняя вилки оклада в рублях
+#         """
+#         dic_currency_to_rur = {"AZN": 35.68, "BYR": 23.91, "EUR": 59.90, "GEL": 21.74,
+#                                "KGS": 0.76, "KZT": 0.13, "RUR": 1, "UAH": 1.64, "USD": 60.66,
+#                                "UZS": 0.0055}
+#         # dic_currency_to_rub = {"Манаты": 35.68, "Белорусские рубли": 23.91, "Евро": 59.90, "Грузинский лари": 21.74,
+#         #                        "Киргизский сом": 0.76, "Тенге": 0.13, "Рубли": 1, "Гривны": 1.64, "Доллары": 60.66,
+#         #                        "Узбекский сум": 0.0055}
+#         return [(int(x.replace(' ', '')) if x != '' else 0) * dic_currency_to_rur[self.salary_currency]
+#                            for x in (self.salary_from, self.salary_to)]
+#
+#     def get_salary(self):
+#         """Передаёт среднее значение оклада
+#
+#         Returns:
+#             float: Среднее оклада
+#         """
+#         return sum(self.currency_to_rur()) / 2
 
-    Attributes:
-        salary_from (str):
-        salary_to (str):
-        salary_gross (str):
-        salary_currency (str):
+class CurrencyApiConnect:
+    """Класс для получения данных из внешних api и формировании по ним файлов
+
     """
-    def __init__(self, salary_from, salary_to, salary_gross, salary_currency):
-        """Инициализирует объект Salary
+    def get_currency_quotes(self, year_borders):
+        """Получение обозначений валют и соответствующих им значений котировок по диапазону годов
 
         Args:
-            salary_from (str):
-            salary_to (str):
-            salary_gross (any):
-            salary_currency (str):
-        """
-        self.salary_from = salary_from
-        self.salary_to = salary_to
-        self.salary_gross = salary_gross
-        self.salary_currency = salary_currency
-
-    def currency_to_rur(self):
-        """Переводит верхнюю и нижнюю вилки оклада в рубли
+            year_borders (tuple[str, str]): Границы временного периода, с которого нужно получить котировки.
 
         Returns:
-            list[int,int]: Верхняя и нижняя вилки оклада в рублях
+            dict[str: dict[str: float]]: Месяц и соответствующие котировки валют по месяцам
         """
-        dic_currency_to_rub = {"Манаты": 35.68, "Белорусские рубли": 23.91, "Евро": 59.90, "Грузинский лари": 21.74,
-                               "Киргизский сом": 0.76, "Тенге": 0.13, "Рубли": 1, "Гривны": 1.64, "Доллары": 60.66,
-                               "Узбекский сум": 0.0055}
-        return [int(x.replace(' ', '')) * dic_currency_to_rub[self.salary_currency]
-                for x in (self.salary_from, self.salary_to)]
+        setlocale(LC_NUMERIC, 'French_Canada.1252')
+        quotes_for_months = {}
+        for year in range(int(year_borders[0]), int(year_borders[1]) + 1):
+            for month in range(1, 13):
+                month = format(month, '02d')
+                response = requests.get(f"http://www.cbr.ru/scripts/XML_daily.asp?date_req=01/{month}/{year}")
+                root_node = ET.ElementTree(ET.fromstring(response.text)).getroot()
+                quotes = {tag.find('CharCode').text: atof(tag.find('Value').text) / atof(tag.find('Nominal').text)
+                          for tag in root_node.findall('Valute')}
+                quotes_for_months[f"{year}-{month}"] = quotes
+                sleep(0.03)
+        return quotes_for_months
 
-    def get_salary(self):
-        """Передаёт среднее значение оклада
+    def save_currency_quotes_in_csv(self, file_name, quotes_for_months, currencies):
+        """Запись котировок валют в csv файл
+
+        Args:
+            file_name (str): Название файла, куда нужно будет сохранять данные
+            quotes_for_months (list[tuple[str, dict[str: float]]]): Котировки валют по месяцам
+            currencies (list[str]): Названия валют
+        """
+        fieldnames = ['date']
+        fieldnames.extend(currencies)
+        with open(f"{file_name}.csv", mode="w", encoding='utf-8') as file:
+            fileWriter = csv.DictWriter(file, delimiter=",", lineterminator="\r", fieldnames=fieldnames)
+            fileWriter.writeheader()
+            for (month, quotes_for_month) in quotes_for_months.items():
+                quotes = {'date': month}
+                quotes.update({currency: quotes_for_month.get(currency, None) if currency != 'RUR' else 1
+                               for currency in currencies})
+                fileWriter.writerow(quotes)
+
+    def read_currency_quotes_from_csv(self, file_name):
+        """Чтение котировок валют из csv файла
+
+        Args:
+            file_name (str): Название csv файла
 
         Returns:
-            float: Среднее оклада
+            dict[str: dict[str: float]]: Котировки валют по годам
         """
-        return sum(self.currency_to_rur()) / 2
+        quotes_for_years = {}
+        with open(f"{file_name}.csv", encoding='utf-8') as file:
+            fileReader = csv.DictReader(file, delimiter=",")
+            for row in fileReader:
+                quotes_for_years[row.pop('date')] = row
+        return quotes_for_years
 
 
 class DataSet:
     """Класс для получения информации из файла csv формата и базовой работы над данными из него
 
-    Attributes:
-        file_name (str): Название csv файла
-        vacancies_objects (list[Vacancy]): Список вакансий полученных из csv файла
     """
-    def __init__(self, file_name):
-        """Инициализирует объект DataSet
-
-        Args:
-            file_name (str): Название файла
-        """
-        self.file_name = file_name
-        self.headers = []
-
-    def split_csv_by_year(self):
+    def split_csv_by_year(self, file_path):
         """Разделение csv файла по годам.
 
-        """
+        Args:
+            file_path (str): Путь к csv файлу
+        """  # ['BYR', 'USD', 'EUR', 'KZT', 'UAH', 'AZN', "KGS", "UZS"]
+        (headers, years_vacancy_info) = self._read_big_csv(file_path)
+        popular_currencies = self._get_most_popular_currencies(years_vacancy_info)
+        currency_connect = CurrencyApiConnect()
+        # quotes = currency_connect.get_currency_quotes(self._get_year_borders(years_vacancy_info))
+        # currency_connect.save_currency_quotes_in_csv("currency_quotes", quotes, popular_currencies)
+        currency_quotes = currency_connect.read_currency_quotes_from_csv("currency_quotes")
+
+        filtered_years_vacancy_info = {}
+        currency_to_rur = {"AZN": 35.68, "BYR": 23.91, "EUR": 59.90, "GEL": 21.74, "KGS": 0.76,
+                           "KZT": 0.13, "RUR": 1, "UAH": 1.64, "USD": 60.66, "UZS": 0.0055}
+        for year, year_info in years_vacancy_info.items():
+            filtered_year_info = []
+            for vacancy_info in year_info:
+                if vacancy_info[3] not in popular_currencies \
+                        or any(map(lambda x: x == '', (vacancy_info[0], vacancy_info[3], vacancy_info[-2], vacancy_info[-1]))): continue
+                quote_value = currency_quotes[vacancy_info[-1][:7]][vacancy_info[3]]
+                salary = float(quote_value if quote_value != '' else currency_to_rur[vacancy_info[3]]) \
+                         * (self._int_or_default(vacancy_info[1], 0) + self._int_or_default(vacancy_info[2], 0)) / 2
+                if salary == 0: continue
+                filtered_year_info.append([vacancy_info[0], salary, vacancy_info[4], vacancy_info[5]])
+            filtered_years_vacancy_info[year] = filtered_year_info
+        self._create_years_csv(['name', 'salary', 'area_name', 'published_at'], filtered_years_vacancy_info)
+
+    def _read_big_csv(self, file_path):
+        headers = []
         years_info = {}
-        with open(self.file_name, encoding="utf-8-sig") as f:
-            for row in [x for x in csv.reader(f)]:
-                if len(self.headers) == 0:
-                    self.headers = row
+        with open(file_path, encoding="utf-8-sig") as f:
+            for row in map(lambda x: x, csv.reader(f)):
+                if len(headers) == 0:
+                    headers = row
                     continue
-                if '' in row or len(row) != len(self.headers):
+                if len(row) != len(headers):
                     continue
                 year = row[-1][0:4]
                 if year in years_info:
                     years_info[year].append(row)
                 else:
                     years_info[year] = [row]
-            f.close()
-        for year, info in years_info.items():
+        return headers, years_info
+
+    def _get_most_popular_currencies(self, years_vacancy_info):
+        currency_count = {}
+        for year_info in years_vacancy_info.values():
+            for vacancy_info in year_info:
+                if vacancy_info[3] not in currency_count:
+                    currency_count[vacancy_info[3]] = 1
+                else:
+                    currency_count[vacancy_info[3]] += 1
+        return [pair[0] for pair in currency_count.items() if pair[1] >= 5000]
+
+    def _get_year_borders(self, years_vacancy_info):
+        keys = list(years_vacancy_info.keys())
+        return years_vacancy_info[keys[0]][0][-1][:4], years_vacancy_info[keys[-1]][0][-1][:4]
+
+    def _int_or_default(self, value, default):
+        return int(value[:value.find('.')]) if value != '' else default
+
+    def _create_years_csv(self, headers, years_vacancy_info):
+        for year, info in years_vacancy_info.items():
             with open(f"years/{year}.csv", mode="w", encoding='utf-8-sig') as csv_year:
                 file_writer = csv.writer(csv_year, delimiter=",", lineterminator="\r")
-                file_writer.writerow(self.headers)
+                file_writer.writerow(headers)
                 file_writer.writerows(info)
-                csv_year.close()
 
-    def get_year_file_names(self, folder_path):
-        """Получение названия файлов из определённой папки
-
-        Args:
-            folder_path (str): Название папки, из которой нужно брать имена файлов
-
-        Returns:
-            list[str]: Названия файлов
-        """
-        return [f for f in listdir(folder_path) if isfile(join(folder_path, f))]
-
-    def get_vacancies_from_file(self, csv_year_file_name):
+    def get_vacancies_from_file(self, csv_year_file_path):
         """Чтение информации из csv файла определённого года и запись в список списков, в котором каждому внутреннему
             списку соответствует одна строка из файла
 
         Args:
-            csv_year_file_name (str): Название csv файла определённого года
+            csv_year_file_path (str): Путь к csv файлу определённого года
 
         Returns:
             list[list[str]]: Форматированный список вакансий
         """
-        info = self._read_csv(csv_year_file_name)[1:]
+        info = self._read_csv(csv_year_file_path)[1:]
         return self._create_vacancies(info)
 
-    def _read_csv(self, file_name):
+    def _read_csv(self, file_path):
         """Чтение информации из csv файла я запись в список списков, в котором каждому внутреннему списку
             соответствует одна строка из файла
 
         Args:
-            file_name (str): Название csv файла
+            file_path (str): Путь к csv файлу
 
         Returns:
             list[list[str]]: Форматированный список вакансий
         """
-        with open(f"years/{file_name}", encoding="utf-8-sig") as f:
+        with open(file_path, encoding="utf-8-sig") as f:
             reader_info = [x for x in csv.reader(f)]
             reader_info.pop(0)
             f.close()
@@ -187,19 +278,8 @@ class DataSet:
         Returns:
             list[Vacancy]: Форматированный список вакансий
         """
-        # vacancies = list(map(lambda info_row: Vacancy(info_row[0], None, None, None, None, None,
-        #                                               Salary(info_row[1], info_row[2], None, info_row[3]),
-        #                                               info_row[4], info_row[5]), info))
-        # return vacancies
-        #
-        # vacancies = []
-        # for info_row in info:
-        #     salary = Salary(info_row[1], info_row[2], None, info_row[3])
-        #     vacancies.append(Vacancy(info_row[0], None, None, None, None, None, salary, info_row[4], info_row[5]))
-        # return vacancies
-        #
-        return [Vacancy(info_row[0], None, None, None, None, None, Salary(info_row[1], info_row[2], None, info_row[3]),
-                        info_row[4], info_row[5]) for info_row in info]
+        return [Vacancy(info_row[0], None, None, None, None, None, info_row[1], info_row[2], info_row[3])
+                for info_row in info]
 
 
 class InputConnect:
@@ -215,31 +295,6 @@ class InputConnect:
         Returns:
             list[Vacancy]: Результат форматирования
         """
-        def formatter_string_number(str_num):
-            """Устранение дробных разделителей в строковом числе
-
-            Args:
-                str_num (str): Число для нормализации
-
-            Returns:
-                str: Результат форматирования числа
-            """
-            return str_num if str_num.find('.') == -1 else str_num[:len(str_num) - 2]
-
-        def formatter_salary(attr_value):
-            """Преобразование оклада в нормированный вид
-
-            Args:
-                attr_value (Salary): Объект оклада
-
-            Returns:
-                Salary: Результат форматирования оклада
-            """
-            salary_from = formatter_string_number(attr_value.salary_from)
-            salary_to = formatter_string_number(attr_value.salary_to)
-            salary_currency = dic_currency[attr_value.salary_currency]
-            return Salary(salary_from, salary_to, None, salary_currency)
-
         def formatter_published_at(attr_value):
             """Получение года из строки, содержащей дату
 
@@ -251,30 +306,11 @@ class InputConnect:
             """
             return attr_value[0:4]
 
-        def format_vacancy(vacancy):
-            """Форматирование аттрибутов вакансии
-
-            Args:
-                vacancy (Vacancy): Вакансия
-
-            Returns:
-                Vacancy: Вакансия с отформатированными аттрибутами
-            """
-            setattr(vacancy, "salary", formatter_salary(getattr(vacancy, "salary")))
+        for vacancy in vacancies:
             setattr(vacancy, "published_at", formatter_published_at(getattr(vacancy, "published_at")))
-            return vacancy
+        return vacancies
 
-        dic_currency = {"AZN": "Манаты", "BYR": "Белорусские рубли", "EUR": "Евро",
-                        "GEL": "Грузинский лари", "KGS": "Киргизский сом", "KZT": "Тенге", "RUR": "Рубли",
-                        "UAH": "Гривны", "USD": "Доллары", "UZS": "Узбекский сум"}
-
-        # for vacancy in vacancies:
-        #     setattr(vacancy, "salary", formatter_salary(getattr(vacancy, "salary")))
-        #     setattr(vacancy, "published_at", formatter_published_at(getattr(vacancy, "published_at")))
-
-        return [format_vacancy(vacancy) for vacancy in vacancies]
-
-    def year_info_finder(self, vacancies, finder_parameter, year_str):
+    def year_info_finder(self, vacancies, finder_parameter):
         """Формирование информации по годам о вакансиях: уровень зарплат по годам, уровень зарплат по годам для
             выбранной вакансии, количество вакансий по годам, количество вакансий по годам для выбранной вакансии,
             уровень зарплат по городам, количество вакансий по городам, общее количество вакансий
@@ -282,24 +318,29 @@ class InputConnect:
         Args:
             vacancies (list[Vacancy]): Список вакансий
             finder_parameter (str): Название вакансии в качестве параметра фильтрации
-            year_str (str): Год
 
         Returns:
             tuple[ dict[int: tuple[int, int]], dict[int: tuple[int, int]], dict[int: int], dict[int: int] ]: Группа
                 списков
         """
-        year = int(year_str)
+        year = int(vacancies[0].published_at)
         salaries_year_level, selected_salary_year_level, vacancies_year_count, selected_vacancy_year_count, = \
             {}, {}, {}, {}
         for vacancy in vacancies:
-            salary = vacancy.salary.get_salary()
-            previous_value = salaries_year_level.get(year, (0, 0))
-            salaries_year_level[year] = (previous_value[0] + salary, previous_value[1] + 1)
-            vacancies_year_count[year] = vacancies_year_count.get(year, 0) + 1
+            salary = float(vacancy.salary)
+            if year not in salaries_year_level:
+                salaries_year_level[year] = (salary, 1)
+                vacancies_year_count[year] = 1
+                selected_salary_year_level[year] = (0, 0)
+                selected_vacancy_year_count[year] = 0
+            else:
+                sal_yr_lvl = salaries_year_level[year]
+                salaries_year_level[year] = (sal_yr_lvl[0] + salary, sal_yr_lvl[1] + 1)
+                vacancies_year_count[year] += 1
             if finder_parameter in vacancy.name:
-                previous_value = selected_salary_year_level.get(year, (0, 0))
-                selected_salary_year_level[year] = (previous_value[0] + salary, previous_value[1] + 1)
-                selected_vacancy_year_count[year] = selected_vacancy_year_count.get(year, 0) + 1
+                sel_sal_ye_lvl = selected_salary_year_level[year]
+                selected_salary_year_level[year] = (sel_sal_ye_lvl[0] + salary, sel_sal_ye_lvl[1] + 1)
+                selected_vacancy_year_count[year] += 1
         return self._year_info_calculating(salaries_year_level, selected_salary_year_level, vacancies_year_count,
                                            selected_vacancy_year_count)
 
@@ -316,10 +357,14 @@ class InputConnect:
         """
         salaries_city_level, vacancies_city_count = {}, {}
         for vacancy in vacancies:
-            salary = vacancy.salary.get_salary()
-            previous_value = salaries_city_level.get(vacancy.area_name, (0, 0))
-            salaries_city_level[vacancy.area_name] = (previous_value[0] + salary, previous_value[1] + 1)
-            vacancies_city_count[vacancy.area_name] = vacancies_city_count.get(vacancy.area_name, 0) + 1
+            salary = float(vacancy.salary)
+            if vacancy.area_name not in salaries_city_level:
+                vacancies_city_count[vacancy.area_name] = 1
+                salaries_city_level[vacancy.area_name] = (salary, 1)
+            else:
+                sal_ct_lvl = salaries_city_level[vacancy.area_name]
+                salaries_city_level[vacancy.area_name] = (sal_ct_lvl[0] + salary, sal_ct_lvl[1] + 1)
+                vacancies_city_count[vacancy.area_name] += 1
         return self._city_info_calculating(salaries_city_level, vacancies_city_count, len(vacancies))
 
     def _year_info_calculating(self, salaries_year_level, selected_salary_year_level, vacancies_year_count,
@@ -343,13 +388,6 @@ class InputConnect:
                     for dict_pair in dictionary.items()}
                 for dictionary in (salaries_year_level, selected_salary_year_level)]
 
-        # (salaries_year_level, selected_salary_year_level) = \
-        #     list(map(lambda dictionary:
-        #              dict(map(lambda dict_pair:
-        #                       (dict_pair[0], int(dict_pair[1][0] / dict_pair[1][1])
-        #                       if dict_pair[1][1] != 0
-        #                       else int(dict_pair[1][0])), dictionary.items())),
-        #              (salaries_year_level, selected_salary_year_level)))
         return salaries_year_level, selected_salary_year_level, vacancies_year_count, selected_vacancy_year_count
 
     @staticmethod
@@ -388,20 +426,6 @@ class InputConnect:
                                for dict_pair in salaries_city_level.items()}
         salaries_city_level = {dict_pair[0]: dict_pair[1] for dict_pair in salaries_city_level.items() if dict_pair[0] in vacancies_city_count}
         salaries_city_level = sort_dict(salaries_city_level)
-
-
-        # vacancies_city_count = dict(map(lambda dict_pair: (dict_pair[0],
-        #                             float(f"{dict_pair[1] / vacancies_count:.4f}")), vacancies_city_count.items()))
-        # vacancies_city_count = dict(filter(lambda dict_pair: dict_pair[1] >= 0.01, vacancies_city_count.items()))
-        # vacancies_city_count = sort_dict(vacancies_city_count)
-        # vacancies_city_count = dict(map(lambda dict_pair: (dict_pair[0], f"{round(dict_pair[1] * 100, 2)}%"),
-        #                                 vacancies_city_count.items()))
-        # salaries_city_level = dict(map(lambda dict_pair: (dict_pair[0], int(dict_pair[1][0] / dict_pair[1][1])
-        #                                if dict_pair[1][1] != 0 else int(dict_pair[1][0])), salaries_city_level.items()))
-        # salaries_city_level = dict(filter(lambda dict_pair: dict_pair[0] in vacancies_city_count,
-        #                                   salaries_city_level.items()))
-        # salaries_city_level = sort_dict(salaries_city_level)
-
         vacancies_city_count = {k: vacancies_city_count[k] for k in list(vacancies_city_count)[-10:][::-1]}
         salaries_city_level = {k: salaries_city_level[k] for k in list(salaries_city_level)[-10:][::-1]}
         return salaries_city_level, vacancies_city_count
@@ -604,21 +628,18 @@ class Consumer(multiprocessing.Process):
 
     Attributes:
         task_queue (multiprocessing.JoinableQueue): Очередь задач
-        vacancies_info (multiprocessing.Queue): Очередь результатов для информации о вакансиях
-        statistics_info (multiprocessing.Queue): Очередь результатов для статистики
+        results (multiprocessing.Queue): Очередь, куда будут складываться результаты
     """
-    def __init__(self, task_queue, vacancies_info, statistics_info):
+    def __init__(self, task_queue, results):
         """Инициализация объекта Consumer
 
         Args:
             task_queue (multiprocessing.JoinableQueue): Очередь задач
-            vacancies_info (multiprocessing.Queue): Очередь результатов для информации о вакансиях
-            statistics_info (multiprocessing.Queue): Очередь результатов для статистики
+            vacancies_info (multiprocessing.Queue): Очередь, куда будут складываться результаты
         """
         multiprocessing.Process.__init__(self)
         self.task_queue = task_queue
-        self.vacancies_info = vacancies_info
-        self.statistics_info = statistics_info
+        self.results = results
 
     def run(self):
         """Выполняет одну задачу, полученную из списка задач, и сохраняет результат в соответствующих
@@ -634,40 +655,68 @@ class Consumer(multiprocessing.Process):
 
             answer = temp_task.process()
             self.task_queue.task_done()
-            self.vacancies_info.put(answer[0])
-            self.statistics_info.put(answer[1])
+            self.results.put(answer)
 
-class Task():
-    """Представляет собой одну задачу для выполнения процессом Consumer; составляет статистику о вакансиях
-        по определённому году
+class ReadTask():
+    """Представляет собой одну задачу для выполнения процессом Consumer; читает данные из заданного csv файла и
+        форматирует их в вакансии
 
     Attributes:
         file_name (str): Название файла, из которого нужно брать данные
         data_set (DadaSet): Объект DadaSet для анализа данных
-        input_connect (InputConnect): Объект InputConnect для форматирования и составления статистики по данным
+        input_connect (InputConnect): Объект InputConnect для форматирования вакансий
     """
     def __init__(self, file_name, data_set, input_connect):
-        """Инициализирует одн объект класс Task
+        """Инициализирует один объект класса Task
 
         Args:
             file_name (str): Название файла, из которого нужно брать данные
-            data_set (DadaSet): Объект DadaSet для анализа данных
-            input_connect (InputConnect): Объект InputConnect для форматирования и составления статистики по данным
+            input_connect (InputConnect): Объект InputConnect для форматирования вакансий
         """
         self.file_name = file_name
         self.data_set = data_set
         self.input_connect = input_connect
 
     def process(self):
-        """Служит списком команд, которые нужно будет выполнять процессу Consumer
+        """Служит командой, которую нужно будет выполнять процессу Consumer
+
+        Returns:
+            list[Vacancy]: Список вакансий за соответствующий год и словари, содержащие статистику
+        """
+        vacancies = self.data_set.get_vacancies_from_file(self.file_name)
+        formatted_vacancies = self.input_connect.info_formatter(vacancies)
+        return formatted_vacancies
+
+
+class CalculateTask():
+    """Представляет собой одну задачу для выполнения процессом Consumer; составляет статистику о вакансиях
+        по определённому году и заданной профессии
+
+    Attributes:
+        data_set (DadaSet): Объект DadaSet для анализа данных
+        vacancies (list[Vacancy]): Вакансии для анализа
+        input_connect (InputConnect): Объект InputConnect для форматирования и составления статистики по данным
+    """
+    def __init__(self, vacancy_name, vacancies, input_connect):
+        """Инициализирует один объект класса Task
+
+        Args:
+            vacancy_name (str): Название вакансии для составления статистики
+            vacancies (list[Vacancy]): Вакансии для анализа
+            input_connect (InputConnect): Объект InputConnect для форматирования и составления статистики по данным
+        """
+        self.vacancy_name = vacancy_name
+        self.vacancies = vacancies
+        self.input_connect = input_connect
+
+    def process(self):
+        """Служит командой, которую нужно будет выполнять процессу Consumer
 
         Returns:
             tuple[list[Vacancy], tuple[dict[int: tuple[int, int]], dict[int: tuple[int, int]],
              dict[int: int], dict[int: int]]: Список вакансий за соответствующий год и словари, содержащие статистику
         """
-        vacancies_for_year = self.data_set.get_vacancies_from_file(self.file_name)
-        formatted_info = self.input_connect.info_formatter(vacancies_for_year)
-        return formatted_info, self.input_connect.year_info_finder(formatted_info, "Программист", self.file_name[:-4])
+        return self.input_connect.year_info_finder(self.vacancies, self.vacancy_name)
 
 
 def get_statistics():
@@ -675,6 +724,17 @@ def get_statistics():
         на основе вводимых пользователем данных
 
     """
+    def get_year_file_paths(folder_path):
+        """Получение названия файлов из определённой папки
+
+        Args:
+            folder_path (str): Название папки, из которой нужно брать имена файлов
+
+        Returns:
+            list[str]: Названия файлов
+        """
+        return [f"{folder_path}/{file}" for file in listdir(folder_path) if isfile(join(folder_path, file))]
+
     def concat_dictionaries_in_tuples(tuples):
         """Используя группы словарей соединить каждый i-тый словарь
 
@@ -707,36 +767,53 @@ def get_statistics():
 
     input_requests = ["Введите название файла: ", "Введите название профессии: "]
     # input_info = [input(input_request) for input_request in input_requests]
-    input_info = ["vacancies_by_year.csv", "Программист"]
+    input_info = ["vacancies_dif_currencies.csv", "Программист"]
     if stat(input_info[0]).st_size == 0:
         print("Пустой файл")
         return
 
-    data_set = DataSet(input_info[0])
     input_connect = InputConnect()
-    # data_set.split_csv_by_year()
-    year_file_names = data_set.get_year_file_names("years")
+    data_set = DataSet()
+
+    data_set.split_csv_by_year(input_info[0])
+    year_file_paths = get_year_file_paths("years")
 
     tasks = multiprocessing.JoinableQueue()
-    vacancies_info = multiprocessing.Queue()
-    statistics_info = multiprocessing.Queue()
-    consumers_count = multiprocessing.cpu_count()
-    consumers = [Consumer(tasks, vacancies_info, statistics_info) for _ in range(consumers_count)]
+    results = multiprocessing.Queue()
+    consumers_count = multiprocessing.cpu_count() - 1
+
+    consumers = [Consumer(tasks, results) for _ in range(consumers_count)]
     for consumer in consumers:
         consumer.start()
-    for file_name in year_file_names:
-        tasks.put(Task(file_name, data_set, input_connect))
+    for file_path in year_file_paths:
+        tasks.put(ReadTask(file_path, data_set, input_connect))
     for _ in range(consumers_count):
         tasks.put(None)
-
     tasks.join()
-    full_vacancies_info = [vacancies_info.get() for _ in range(len(year_file_names))]
-    years_statistics = concat_dictionaries_in_tuples([statistics_info.get() for _ in range(len(year_file_names))])
-    years_statistics = tuple(sort_dict_by_key(dictionary) for dictionary in years_statistics)
-    cities_statistics = input_connect.city_info_finder(reduce(operator.concat, full_vacancies_info))
-    report = Report(reduce(operator.concat, [years_statistics, cities_statistics]))
+    consumers.clear()
+
+    all_vacancies_list = [results.get() for _ in range(len(year_file_paths))]
+    tasks.empty()
+    results.empty()
+
+    tasks = multiprocessing.JoinableQueue()
+    results = multiprocessing.Queue()
+    consumers = [Consumer(tasks, results) for _ in range(consumers_count)]
+    for consumer in consumers:
+        consumer.start()
+    for vacancies_list in all_vacancies_list:
+        tasks.put(CalculateTask(input_info[1], vacancies_list, input_connect))
+    for _ in range(consumers_count):
+        tasks.put(None)
+    tasks.join()
+    consumers.clear()
+
+    all_statistics = concat_dictionaries_in_tuples([results.get() for _ in range(len(year_file_paths))])
+    year_statistics = tuple(sort_dict_by_key(dictionary) for dictionary in all_statistics)
+    city_statistics = input_connect.city_info_finder(reduce(operator.concat, all_vacancies_list))
+    report = Report(reduce(operator.concat, [year_statistics, city_statistics]))
+
     report.print_statistics()
     # report.generate_excel(input_info[1])
     # report.generate_image(input_info[1])
     # report.generate_pdf(input_info[1])
-

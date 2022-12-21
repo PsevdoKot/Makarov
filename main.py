@@ -1,15 +1,14 @@
 # from vacancies import get_vacancies
+# from statistics import CurrencyApiConnect
 from statistics import get_statistics
-# from statistics_initial import get_statistics
-# import yappi
 
 def main_function():
     """Выбор типа анализа данных из csv-файла
 
     """
     main_input_request = "Выберите тип вывода: "
-    main_input_info = input(main_input_request)
-    # input_info = ["Вакансии"]
+    # main_input_info = input(main_input_request)
+    main_input_info = "Статистика"
     if main_input_info != "Вакансии" and main_input_info != "Статистика":
         print("Введён неправильный тип вывода")
         return
@@ -22,9 +21,4 @@ if __name__ == '__main__':
     main_function()
 
 
-# yappi.start()
-# func_stats = yappi.get_func_stats()
-# func_stats.print_all()
-# yappi.stop()
-# yappi.clear_stats()
-# python -m cProfile main.py
+# python -m cProfile -s cumtime main.py

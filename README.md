@@ -30,3 +30,7 @@ Python Tasks 2.X.X - 3.X.X
 
 3.3.2
 Первые 100 результатов в формате CSV представленны файлом << formatted_vacancies.csv >>
+
+
+3.3.3
+Полученные данные с api hh.ru в формате CSV-файла представленны файлом << vacancies_for_past_day.csv >>

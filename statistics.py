@@ -1,10 +1,12 @@
 import csv
 import operator
 import multiprocessing
+import time
 from time import sleep
 import pdfkit
 import requests
 import csv
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 import xml.etree.ElementTree as ET
@@ -121,11 +123,12 @@ class CurrencyApiConnect:
         for year in range(int(year_borders[0]), int(year_borders[1]) + 1):
             for month in range(1, 13):
                 month = format(month, '02d')
-                response = requests.get(f"http://www.cbr.ru/scripts/XML_daily.asp?date_req=01/{month}/{year}")
-                root_node = ET.ElementTree(ET.fromstring(response.text)).getroot()
+                req = requests.get(f"http://www.cbr.ru/scripts/XML_daily.asp?date_req=01/{month}/{year}")
+                root_node = ET.ElementTree(ET.fromstring(req.text)).getroot()
                 quotes = {tag.find('CharCode').text: atof(tag.find('Value').text) / atof(tag.find('Nominal').text)
                           for tag in root_node.findall('Valute')}
                 quotes_for_months[f"{year}-{month}"] = quotes
+                req.close()
                 sleep(0.03)
         return quotes_for_months
 
@@ -165,6 +168,36 @@ class CurrencyApiConnect:
         return quotes_for_years
 
 
+class HHruApiConnect:
+    def save_vacancy_data_for_past_day(self):
+        yesterday = time.strftime('%Y-%m-%d' , time.gmtime( time.time() - 86400 ))
+        with open("vacancies_for_past_day.csv", mode="w", encoding='utf-8') as file:
+            fileWriter = csv.writer(file, delimiter=",", lineterminator="\r")
+            fileWriter.writerow(['name', 'salary_from', 'salary_to', 'salary_currency', 'area_name', 'published_at'])
+            for time_from, time_to in (('00:00:00', '10:00:00'), ('10:00:00', '13:00:00'),
+                                       ('13:00:00', '16:00:00'), ('16:00:00', '23:59:59')):
+                for page in range(20):
+                    vacancy_data = json.loads(self._get_vacancy_data_from_HHru(yesterday, time_from, time_to, page))
+                    for item in vacancy_data['items']:
+                        fileWriter.writerow([item['name'], item['salary']['from'], item['salary']['to'],
+                                            item['salary']['currency'], item['area']['name'], item['published_at']])
+                    time.sleep(0.05)
+
+    def _get_vacancy_data_from_HHru(self, date, time_from, time_to, page):
+        params = {
+            'specialization': 1,
+            'only_with_salary': True,
+            'date_from': f'{date}T{time_from}',
+            'date_to': f'{date}T{time_to}',
+            'per_page': 100,
+            'page': page
+        }
+        req = requests.get('https://api.hh.ru/vacancies', params)
+        vacancy_data = req.content.decode()
+        req.close()
+        return vacancy_data
+
+
 class DataSet:
     """Класс для получения информации из файла csv формата и базовой работы над данными из него
 
@@ -174,7 +207,7 @@ class DataSet:
 
         Args:
             file_path (str): Путь к csv файлу
-        """  # ['BYR', 'USD', 'EUR', 'KZT', 'UAH', 'AZN', "KGS", "UZS"]
+        """
         (headers, years_vacancy_info) = self._read_big_csv(file_path)
         popular_currencies = self._get_most_popular_currencies(years_vacancy_info)
         currency_connect = CurrencyApiConnect()
@@ -230,7 +263,9 @@ class DataSet:
         return years_vacancy_info[keys[0]][0][-1][:4], years_vacancy_info[keys[-1]][0][-1][:4]
 
     def _int_or_default(self, value, default):
-        return int(value[:value.find('.')]) if value != '' else default
+        dotIndex = value.find('.')
+        dotIndex = dotIndex if dotIndex != -1 else len(value)
+        return int(value[:dotIndex]) if value != '' else default
 
     def _create_years_csv(self, headers, years_vacancy_info):
         for year, info in years_vacancy_info.items():

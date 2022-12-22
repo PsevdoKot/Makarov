@@ -1,6 +1,7 @@
 # from vacancies import get_vacancies
 # from statistics import CurrencyApiConnect
 from statistics import get_statistics
+from statistics import HHruApiConnect
 
 def main_function():
     """Выбор типа анализа данных из csv-файла
@@ -17,8 +18,13 @@ def main_function():
     # else:
     get_statistics()
 
+def test():
+    hh = HHruApiConnect()
+    hh.save_vacancy_data_for_past_day()
+
 if __name__ == '__main__':
     main_function()
+    # test()
 
 
 # python -m cProfile -s cumtime main.py

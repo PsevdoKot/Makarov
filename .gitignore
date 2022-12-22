@@ -1,6 +1,7 @@
 .idea/
 venv/
 years/
+vacancies_for_past_day.csv
 vacancies_dif_currencies.csv
 vacancies_by_year.csv
 vacancies_medium.csv

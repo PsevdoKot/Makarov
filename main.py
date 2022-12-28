@@ -1,7 +1,7 @@
 # from vacancies import get_vacancies
 # from statistics import CurrencyApiConnect
 from statistics import get_statistics
-from statistics import HHruApiConnect
+from statistics import CurrencyApiConnect
 
 def main_function():
     """Выбор типа анализа данных из csv-файла
@@ -19,12 +19,15 @@ def main_function():
     get_statistics()
 
 def test():
-    hh = HHruApiConnect()
-    hh.save_vacancy_data_for_past_day()
+    db = CurrencyApiConnect('currency_quotes.db')
+    quotes = db.get_currency_quotes(('2003', '2022'))
+    db.save_currency_quotes_in_db(quotes, ['USD','RUR','EUR','KZT','UAH','BYR'])
+    cur_quotes = db.read_currency_quotes_from_db(['USD','RUR','EUR','KZT','UAH','BYR'])
+    print(cur_quotes)
 
 if __name__ == '__main__':
-    main_function()
-    # test()
+    # main_function()
+    test()
 
 
 # python -m cProfile -s cumtime main.py

@@ -2,6 +2,7 @@
 venv/
 years/
 vacancies_dif_currencies.csv
+vacancies_dif_currencies1.csv
 vacancies_by_year.csv
 vacancies_medium.csv
 vacancies_empty.csv

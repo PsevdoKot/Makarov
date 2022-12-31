@@ -20,14 +20,15 @@ def main_function():
 
 def test():
     db = CurrencyApiConnect('currency_quotes.db')
-    quotes = db.get_currency_quotes(('2003', '2022'))
-    db.save_currency_quotes_in_db(quotes, ['USD','RUR','EUR','KZT','UAH','BYR'])
+    # quotes = db.get_currency_quotes(('2003', '2022'))
+    # db.save_currency_quotes_in_db(quotes, ['USD','RUR','EUR','KZT','UAH','BYR'])
     cur_quotes = db.read_currency_quotes_from_db(['USD','RUR','EUR','KZT','UAH','BYR'])
+
     print(cur_quotes)
 
 if __name__ == '__main__':
-    # main_function()
-    test()
+    main_function()
+    # test()
 
 
 # python -m cProfile -s cumtime main.py

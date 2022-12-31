@@ -10,7 +10,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import xml.etree.ElementTree as ET
-from os import listdir, stat
+from glob import glob
+from os import listdir, stat, remove
 from os.path import isfile, join
 from functools import reduce, cmp_to_key
 from openpyxl import Workbook
@@ -106,22 +107,20 @@ class Vacancy:
 #         return sum(self.currency_to_rur()) / 2
 
 class CurrencyApiConnect:
-    """Класс для получения данных из внешних api и формировании по ним файлов
+    """Класс для получения данных из внешнего api ЦентроБанка и формировании по ним файлов
 
     Attributes:
-        connect (sqlite3.connect): Объект управления базой данных
-        cursor (sqlite3.connect): Объект управления базой данных
-        db_path (str): Путь к базе данных
+        db_connect (sqlite3.connect): Объект управления базой данных
+        db_cursor (sqlite3.connect): Объект управления базой данных
     """
-    def __init__(self, db_path):
+    def __init__(self, db_connect):
         """Инициализация объекта CurrencyApiConnect
 
         Args:
-            db_path (str): Путь к базе данных
+            connect (sqlite3.connect): Коннектор к базе данных
         """
-        self.connect = sqlite3.connect(db_path)
-        self.cursor = self.connect.cursor()
-        self.db_path = db_path
+        self.db_connect = db_connect
+        self.db_cursor = self.db_connect.cursor()
 
     def get_currency_quotes(self, year_borders):
         """Получение обозначений валют и соответствующих им значений котировок по диапазону годов
@@ -154,6 +153,17 @@ class CurrencyApiConnect:
             currencies (list[str]): Названия валют
         """
         def db_query_join(query, type, join_str, data):
+            """Формирование запроса к базе данных на основе шаблона
+
+            Args:
+                query (str): Шаблон запроса
+                type (str): Тип значений (для всех одинаков)
+                join_str (str): Строка для соединения
+                data (list[str]): Значения для подстановки
+
+            Returns:
+                str: Сформированный запрос
+            """
             i = 0
             while True:
                 query = f"{query}{data[i]}{type}"
@@ -166,15 +176,15 @@ class CurrencyApiConnect:
             return query
 
         query = db_query_join("CREATE TABLE IF NOT EXISTS quotes(\ndate TEXT PRIMARY KEY,\n", ' REAL', ',\n', currencies)
-        self.cursor.execute(query)
-        self.connect.commit()
+        self.db_cursor.execute(query)
+        self.db_connect.commit()
         query = db_query_join("INSERT INTO quotes\nVALUES(?, ", '', ', ', ['?' for _ in currencies])
         for (date, quotes_for_month) in quotes_for_months.items():
             quotes = tuple([date])
             quotes += tuple(list(map(lambda currency: quotes_for_month.get(currency, None)
                                                       if currency != 'RUR' else 1, currencies)))
-            self.cursor.execute(query, quotes)
-        self.connect.commit()
+            self.db_cursor.execute(query, quotes)
+        self.db_connect.commit()
 
 
     def read_currency_quotes_from_db(self, currencies):
@@ -186,8 +196,8 @@ class CurrencyApiConnect:
         Returns:
             dict[str: dict[str: float]]: Котировки валют по годам
         """
-        self.cursor.execute("SELECT * FROM quotes;")
-        date_and_quotes = self.cursor.fetchall()
+        self.db_cursor.execute("SELECT * FROM quotes;")
+        date_and_quotes = self.db_cursor.fetchall()
         quotes_for_years = {date_and_quotes[date_index][0]:
                                 {currencies[currency_index]: date_and_quotes[date_index][currency_index + 1]
                                  for currency_index in range(len(currencies))}
@@ -196,7 +206,13 @@ class CurrencyApiConnect:
 
 
 class HHruApiConnect:
+    """Класс для получения данных из внешнего api hhru и формировании по ним файлов
+
+    """
     def save_vacancy_data_for_past_day(self):
+        """Получение и сохранение данных о вакансиях за предыдущий день
+
+        """
         yesterday = time.strftime('%Y-%m-%d' , time.gmtime( time.time() - 86400 ))
         with open("vacancies_for_past_day.csv", mode="w", encoding='utf-8') as file:
             fileWriter = csv.writer(file, delimiter=",", lineterminator="\r")
@@ -211,6 +227,17 @@ class HHruApiConnect:
                     time.sleep(0.05)
 
     def _get_vacancy_data_from_HHru(self, date, time_from, time_to, page):
+        """Получение данных о вакансиях за определённый промежуток времени
+
+        Args:
+            date (str): Дата
+            time_from (str): Время, с которого начать брать данные
+            time_to (str): Время, заканчивая которым брать данные
+            page (int): Страница данных
+
+        Returns:
+            dict[str: dict[str: float | str]]: Данных о вакансиях
+        """
         params = {
             'specialization': 1,
             'only_with_salary': True,
@@ -229,15 +256,15 @@ class DataSet:
     """Класс для получения информации из файла csv формата и базовой работы над данными из него
 
     """
-    def split_csv_by_year(self, file_path):
+    def split_csv_by_year(self, db_connector, file_path):
         """Разделение csv файла по годам.
 
         Args:
             file_path (str): Путь к csv файлу
         """
         (headers, years_vacancy_info) = self._read_big_csv(file_path)
-        popular_currencies = self._get_most_popular_currencies(years_vacancy_info)
-        currency_db = CurrencyApiConnect('currency_quotes.db')
+        popular_currencies = ['USD','RUR','EUR','KZT','UAH','BYR'] #self._get_most_popular_currencies(years_vacancy_info)
+        currency_db = CurrencyApiConnect(db_connector)
         quotes = currency_db.get_currency_quotes(self._get_year_borders(years_vacancy_info))
         currency_db.save_currency_quotes_in_db(quotes, popular_currencies)
         popular_currency_quotes = currency_db.read_currency_quotes_from_db(popular_currencies)
@@ -251,12 +278,15 @@ class DataSet:
                 if vacancy_info[3] not in popular_currencies \
                         or any(map(lambda x: x == '', (vacancy_info[0], vacancy_info[3], vacancy_info[-2], vacancy_info[-1]))): continue
                 quote_value = popular_currency_quotes[vacancy_info[-1][:7]][vacancy_info[3]]
-                salary = float(quote_value if quote_value != '' else currency_to_rur[vacancy_info[3]]) \
+                salary = float(quote_value if quote_value != None else currency_to_rur[vacancy_info[3]]) \
                          * (self._int_or_default(vacancy_info[1], 0) + self._int_or_default(vacancy_info[2], 0)) / 2
                 if salary == 0: continue
-                filtered_year_info.append([vacancy_info[0], salary, vacancy_info[4], vacancy_info[5]])
+                filtered_year_info.append((vacancy_info[0], salary, vacancy_info[4], vacancy_info[5]))
             filtered_years_vacancy_info[year] = filtered_year_info
-        self._create_years_csv(['name', 'salary', 'area_name', 'published_at'], filtered_years_vacancy_info)
+
+        self._delete_files_in_folder('years/*')
+        # self._create_years_csv(['name', 'salary', 'area_name', 'published_at'], filtered_years_vacancy_info)
+        self._create_years_db(db_connector, filtered_years_vacancy_info)
 
     def _read_big_csv(self, file_path):
         headers = []
@@ -271,14 +301,16 @@ class DataSet:
                 year = row[-1][0:4]
                 if year in years_info:
                     years_info[year].append(row)
-                else:
+                elif year in ['2003', '2004', '2005']:
                     years_info[year] = [row]
         return headers, years_info
 
     def _get_most_popular_currencies(self, years_vacancy_info):
         currency_count = {}
-        for year_info in years_vacancy_info.values():
+        for year_info in list(map(lambda x: x, years_vacancy_info.values())):
             for vacancy_info in year_info:
+                if vacancy_info[3] == '':
+                    continue
                 if vacancy_info[3] not in currency_count:
                     currency_count[vacancy_info[3]] = 1
                 else:
@@ -294,12 +326,32 @@ class DataSet:
         dotIndex = dotIndex if dotIndex != -1 else len(value)
         return int(value[:dotIndex]) if value != '' else default
 
-    def _create_years_csv(self, headers, years_vacancy_info):
+    def _delete_files_in_folder(self, folder_path):
+        for file in glob(folder_path):
+            remove(file)
+
+    # def _create_years_csv(self, headers, years_vacancy_info):
+    #     for year, info in years_vacancy_info.items():
+    #         with open(f"years/{year}.csv", mode="w", encoding='utf-8-sig') as csv_year:
+    #             file_writer = csv.writer(csv_year, delimiter=",", lineterminator="\r")
+    #             file_writer.writerow(headers)
+    #             file_writer.writerows(info)
+
+    def _create_years_db(self, db_connect, years_vacancy_info):
+        db_cursor = db_connect.cursor()
+        i = -1
         for year, info in years_vacancy_info.items():
-            with open(f"years/{year}.csv", mode="w", encoding='utf-8-sig') as csv_year:
-                file_writer = csv.writer(csv_year, delimiter=",", lineterminator="\r")
-                file_writer.writerow(headers)
-                file_writer.writerows(info)
+            db_cursor.execute(f"CREATE TABLE vacancies_for_{year}(\n"
+                                  f"vacancy_id INTEGER PRIMARY KEY,\n"
+                                  f"name TEXT,\n"
+                                  f"salary REAL,\n"
+                                  f"area_name TEXT,\n"
+                                  f"published_at TEXT)")
+            db_connect.commit()
+            db_cursor.executemany(f"INSERT INTO vacancies_for_{year}\nVALUES(?, ?, ?, ?, ?);",
+                                  [(i := i + 1, vacancy_info[0], vacancy_info[1], vacancy_info[2], vacancy_info[3])
+                                   for vacancy_info in info])
+        db_connect.commit()
 
     def get_vacancies_from_file(self, csv_year_file_path):
         """Чтение информации из csv файла определённого года и запись в список списков, в котором каждому внутреннему
@@ -311,24 +363,44 @@ class DataSet:
         Returns:
             list[list[str]]: Форматированный список вакансий
         """
-        info = self._read_csv(csv_year_file_path)[1:]
+        # info = self._read_csv(csv_year_file_path)[1:]
+        info = self._read_db(csv_year_file_path)[1:]
         return self._create_vacancies(info)
 
-    def _read_csv(self, file_path):
-        """Чтение информации из csv файла я запись в список списков, в котором каждому внутреннему списку
-            соответствует одна строка из файла
+    # def _read_csv(self, file_path):
+    #     """Чтение информации из csv файла я запись в список списков, в котором каждому внутреннему списку
+    #         соответствует одна строка из файла
+    #
+    #     Args:
+    #         file_path (str): Путь к csv файлу
+    #
+    #     Returns:
+    #         list[list[str]]: Форматированный список вакансий
+    #     """
+    #     with open(file_path, encoding="utf-8-sig") as f:
+    #         reader_info = [x for x in csv.reader(f)]
+    #         reader_info.pop(0)
+    #     return reader_info
+
+    def _read_db(self, db_connector):
+        """Чтение информации из таблицы и запись в список списков, в котором каждому внутреннему списку
+            соответствует одна строка из таблицы
 
         Args:
-            file_path (str): Путь к csv файлу
+            db_connector (sqlite3): Название таблицы
 
         Returns:
             list[list[str]]: Форматированный список вакансий
         """
-        with open(file_path, encoding="utf-8-sig") as f:
-            reader_info = [x for x in csv.reader(f)]
-            reader_info.pop(0)
-            f.close()
-        return reader_info
+        a =  1 + 1
+        db_cursor = db_connector.cursor()
+        # self.db_cursor.execute("SELECT * FROM quotes;")
+        # date_and_quotes = self.db_cursor.fetchall()
+        # quotes_for_years = {date_and_quotes[date_index][0]:
+        #                         {currencies[currency_index]: date_and_quotes[date_index][currency_index + 1]
+        #                          for currency_index in range(len(currencies))}
+        #                     for date_index in range(len(date_and_quotes))}
+        # return quotes_for_years
 
     def _create_vacancies(self, info):
         """Преобразование данных из csv файла в список вакансий, в котором каждой вакансии соответствует одна строка
@@ -836,8 +908,9 @@ def get_statistics():
 
     input_connect = InputConnect()
     data_set = DataSet()
+    db_connect = sqlite3.connect('vacancies.db')
 
-    data_set.split_csv_by_year(input_info[0])
+    data_set.split_csv_by_year(db_connect, input_info[0])
     year_file_paths = get_year_file_paths("years")
 
     tasks = multiprocessing.JoinableQueue()
